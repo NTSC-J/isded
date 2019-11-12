@@ -30,21 +30,26 @@
 extern crate sgx_types;
 extern crate sgx_urts;
 extern crate dirs;
-extern crate fastcgi;
 
 use sgx_types::*;
 use sgx_urts::SgxEnclave;
 use std::io::{Read, Write};
 use std::fs;
 use std::path;
-use std::sync::{Arc, Mutex};
+use std::ffi::CString;
+use std::convert::TryInto;
 
 static ENCLAVE_FILE: &'static str = "enclave.signed.so";
 static ENCLAVE_TOKEN: &'static str = "enclave.token";
+static DATA_FILE: &'static str = "sealeddata.bin";
 
+// TODO: bindgenでこのブロックを自動生成
 extern {
-    fn get_counter(eid: sgx_enclave_id_t, retval: *mut u64, sealed_raw: *mut u8, sealed_raw_size: u32) -> sgx_status_t;
-    fn set_counter(eid: sgx_enclave_id_t, v: u64, sealed_raw: *mut u8, sealed_raw_size: u32) -> sgx_status_t;
+    fn initialize(eid: sgx_enclave_id_t, retval: * mut i64, json: * const c_char) -> sgx_status_t;
+    fn update(eid: sgx_enclave_id_t, retval: * mut i64) -> sgx_status_t;
+    fn get_raw_data(eid: sgx_enclave_id_t, retval: * mut i64, dest: * mut u8, dest_size: usize) -> sgx_status_t;
+    fn save(eid: sgx_enclave_id_t, retval: * mut i64, sealed_dest: * mut u8, sealed_dest_size: u32) -> sgx_status_t;
+    fn restore(eid: sgx_enclave_id_t, retval: * mut i64, sealed_src: * mut u8, sealed_src_size: u32) -> sgx_status_t;
 }
 
 fn main() {
@@ -59,25 +64,53 @@ fn main() {
         },
     };
 
-    let sealed_raw = Arc::new(Mutex::new(vec![0_u8; 2048]));
-
-    unsafe {
-        let mut sealed_raw = sealed_raw.lock().unwrap();
-        set_counter(enclave.geteid(), 10000, sealed_raw.as_mut_ptr(), sealed_raw.len() as u32);
+    let mut sealed_data = Vec::new();
+    match fs::File::open(DATA_FILE) {
+        Ok(mut f) => {
+            f.read_to_end(&mut sealed_data).unwrap();
+            let mut r: i64 = 0;
+            unsafe { restore(enclave.geteid(), &mut r, sealed_data.as_mut_ptr(), sealed_data.len() as u32); }
+        },
+        Err(_) => {
+            let mut r: i64 = 0;
+            let json = CString::new("{x: 42}").unwrap();
+            unsafe { initialize(enclave.geteid(), &mut r, json.as_ptr()); }
+            if r != 0 {
+                println!("initialize failed (returned {})", r);
+                return;
+            }
+            fs::File::create(DATA_FILE).unwrap();
+        }
     }
 
-    fastcgi::run(move |mut req| {
-        write!(req.stdout(), "Content-Type: text/plain\n\n").unwrap();
+    let mut r: i64 = 0;
+    unsafe { update(enclave.geteid(), &mut r); }
 
-        let mut counter = 0;
-        unsafe {
-            let mut sealed_raw = sealed_raw.lock().unwrap();
-            get_counter(enclave.geteid(), &mut counter, sealed_raw.as_mut_ptr(), sealed_raw.len() as u32);
-        };
-        writeln!(req.stdout(), "{}", counter).unwrap();
-    });
+    match fs::File::open(DATA_FILE) {
+        Ok(mut f) => {
+            unsafe { save(enclave.geteid(), &mut r, sealed_data.as_mut_ptr(), sealed_data.len() as u32); }
+            if sealed_data.len() < r.try_into().unwrap() {
+                println!("save failed (returned {})", r);
+                return;
+            }
+            f.write_all(&sealed_data).unwrap();
+        },
+        Err(_) => {
+            println!("error opening file for saving");
+            return;
+        }
+    }
 
-    //enclave.destroy();
+    let mut r: i64 = 0;
+    let mut raw_json: Vec<u8> = vec![0; 2048];
+    unsafe { get_raw_data(enclave.geteid(), &mut r, raw_json.as_mut_ptr(), raw_json.len()); }
+    if r != 0 {
+        println!("get_raw_data failed (returned {})", r);
+        return;
+    }
+    println!("raw json: {}", String::from_utf8(raw_json).unwrap());
+
+    enclave.destroy();
 }
 
 fn init_enclave() -> SgxResult<SgxEnclave> {

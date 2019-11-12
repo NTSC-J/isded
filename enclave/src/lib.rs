@@ -1,5 +1,4 @@
 // Copyright (C) 2017-2019 Baidu, Inc. All Rights Reserved.
-//
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
 // are met:
@@ -26,7 +25,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#![crate_name = "helloworldsampleenclave"]
+#![crate_name = "sealenclave"]
 #![crate_type = "staticlib"]
 
 #![cfg_attr(not(target_env = "sgx"), no_std)]
@@ -41,41 +40,105 @@ extern crate sgx_tstd as std;
 extern crate sgx_tseal;
 use sgx_tseal::SgxSealedData;
 
+#[macro_use]
+extern crate lazy_static;
+
 use sgx_types::*;
 use sgx_types::marker::ContiguousMemory;
+use std::sync::SgxMutex;
 
-#[no_mangle]
-pub extern "C" fn get_counter(sealed_raw: * mut u8, sealed_raw_size: u32) -> u64 {
-    let opt = from_sealed_raw_for_fixed::<u64>(sealed_raw, sealed_raw_size);
-    let sealed_data = match opt {
-        Some(x) => x,
-        None => {
-            return std::u64::MAX;
-        }
-    };
-    let unsealed_data = sealed_data.unseal_data().unwrap();
-    let ret = unsealed_data.get_decrypt_txt();
-    set_counter(ret + 1, sealed_raw, sealed_raw_size);
-    *ret
+extern crate libc;
+use libc::c_char;
+use std::ffi::CStr;
+use std::str;
+use std::ptr;
+
+extern crate serde;
+use serde::{Serialize, Deserialize};
+extern crate serde_json;
+
+#[derive(Serialize, Deserialize, Debug, Copy, Clone)]
+struct SecretData {
+    x: i64
+}
+unsafe impl ContiguousMemory for SecretData { }
+
+lazy_static! {
+    static ref RAW_DATA: SgxMutex<Option<SecretData>> = SgxMutex::new(None);
 }
 
+// RAW_DATAを初期化
 #[no_mangle]
-pub extern "C" fn set_counter(v: u64, sealed_raw: * mut u8, sealed_raw_size: u32) {
-    let add: [u8; 0] = [0_u8; 0]; // additional data
-    let sealed_data = SgxSealedData::<u64>::seal_data(&add, &v).unwrap();
+pub extern "C" fn initialize(json: * const c_char) -> i64 {
+    if (*RAW_DATA).lock().unwrap().is_some() {
+        return -1;
+    }
+    let json: &CStr = unsafe { CStr::from_ptr(json) };
+    let json: &str = json.to_str().unwrap();
+
+    let deser = serde_json::from_str(&json);
+    match deser {
+        Ok(x) => *RAW_DATA.lock().unwrap() = Some(x),
+        _ => return -2
+    }
+    0
+}
+
+// JSONにしてそのまま出力
+#[no_mangle]
+pub extern "C" fn get_raw_data(dest: * mut u8, dest_size: usize) -> i64 {
+    if (*RAW_DATA).lock().unwrap().is_none() {
+        return -1;
+    }
+    let raw_data = (*RAW_DATA).lock().unwrap().unwrap();
+    let json = serde_json::to_string(&raw_data).unwrap();
+
+    if json.len() <= dest_size {
+        unsafe { ptr::copy(json.as_ptr(), dest, json.len()); }
+    }
+
+    json.len() as i64
+}
+
+// データを操作する
+#[no_mangle]
+pub extern "C" fn update() -> i64 {
+    if (*RAW_DATA).lock().unwrap().is_none() {
+        return -1;
+    }
+    let x = (*RAW_DATA).lock().unwrap().unwrap().x;
+    *RAW_DATA.lock().unwrap() = Some(SecretData{x: x + 1});
     
-    to_sealed_raw_for_fixed(&sealed_data, sealed_raw, sealed_raw_size);
+    0
 }
 
-fn to_sealed_raw_for_fixed<T: Copy + ContiguousMemory>(sealed_data: &SgxSealedData<T>, sealed_raw: * mut u8, sealed_raw_size: u32) -> Option<* mut sgx_sealed_data_t> {
+// Sealして出力
+#[no_mangle]
+pub extern "C" fn save(sealed_dest: * mut u8, sealed_dest_size: u32) -> i64 {
+    if (*RAW_DATA).lock().unwrap().is_none() {
+        return -1;
+    }
+    let add: [u8; 0] = [0_u8; 0]; // additional dataは使わない
+    let raw_data = (*RAW_DATA).lock().unwrap().unwrap();
+    let sealed_data = SgxSealedData::<SecretData>::seal_data(&add, &raw_data).unwrap();
+    // TODO: カウンタを追加
     unsafe {
-        sealed_data.to_raw_sealed_data_t(sealed_raw as * mut sgx_sealed_data_t, sealed_raw_size)
+        sealed_data.to_raw_sealed_data_t(sealed_dest as * mut sgx_sealed_data_t, sealed_dest_size);
+        0
     }
 }
 
-fn from_sealed_raw_for_fixed<'a, T: Copy + ContiguousMemory>(sealed_raw: * mut u8, sealed_raw_size: u32) -> Option<SgxSealedData<'a, T>> {
+// Sealされたデータを読み込み
+#[no_mangle]
+pub extern "C" fn restore(sealed_src: * mut u8, sealed_src_size: u32) -> i64 {
+    if (*RAW_DATA).lock().unwrap().is_some() {
+        return -1;
+    }
     unsafe {
-        SgxSealedData::<T>::from_raw_sealed_data_t(sealed_raw as * mut sgx_sealed_data_t, sealed_raw_size)
+        // TODO: カウンタを検証
+        let sealed_data = SgxSealedData::<SecretData>::from_raw_sealed_data_t(sealed_src as * mut sgx_sealed_data_t, sealed_src_size).unwrap();
+        *RAW_DATA.lock().unwrap() = Some(*sealed_data.unseal_data().unwrap().get_decrypt_txt());
+        0
     }
 }
 
