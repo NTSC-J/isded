@@ -62,83 +62,114 @@ struct SecretData {
     x: i64
 }
 unsafe impl ContiguousMemory for SecretData { }
-
-lazy_static! {
-    static ref RAW_DATA: SgxMutex<Option<SecretData>> = SgxMutex::new(None);
+impl SecretData {
+    fn update(&mut self) -> SecretData {
+        self.x += 1;
+        *self
+    }
 }
 
-// RAW_DATAを初期化
+lazy_static! {
+    static ref SECRET: SgxMutex<Option<SecretData>> = SgxMutex::new(None);
+}
+
+// SECRETを初期化
 #[no_mangle]
 pub extern "C" fn initialize(json: * const c_char) -> i64 {
-    if (*RAW_DATA).lock().unwrap().is_some() {
-        return -1;
-    }
+    eprintln!("initialize");
+    let mut secret = match SECRET.lock() {
+        Ok(x) => match *x {
+            Some(_) => return -1,
+            None => x
+        },
+        Err(_) => return -2
+    };
     let json: &CStr = unsafe { CStr::from_ptr(json) };
     let json: &str = json.to_str().unwrap();
 
     let deser = serde_json::from_str(&json);
     match deser {
-        Ok(x) => *RAW_DATA.lock().unwrap() = Some(x),
-        _ => return -2
+        Ok(x) => *secret = Some(x),
+        Err(_) => return -3
     }
+    dbg!(*secret);
     0
 }
 
 // JSONにしてそのまま出力
 #[no_mangle]
 pub extern "C" fn get_raw_data(dest: * mut u8, dest_size: usize) -> i64 {
-    if (*RAW_DATA).lock().unwrap().is_none() {
-        return -1;
-    }
-    let raw_data = (*RAW_DATA).lock().unwrap().unwrap();
-    let json = serde_json::to_string(&raw_data).unwrap();
-
+    eprintln!("get_raw_data");
+    let secret = match SECRET.lock() {
+        Ok(x) => match *x {
+            None => return -1,
+            Some(y) => y
+        },
+        Err(_) => return -2
+    };
+    dbg!(&secret);
+    let json = serde_json::to_string(&secret).unwrap();
     if json.len() <= dest_size {
         unsafe { ptr::copy(json.as_ptr(), dest, json.len()); }
     }
-
     json.len() as i64
 }
 
 // データを操作する
 #[no_mangle]
 pub extern "C" fn update() -> i64 {
-    if (*RAW_DATA).lock().unwrap().is_none() {
-        return -1;
+    eprintln!("update");
+    if let Ok(mut x) = SECRET.lock() {
+        if let Some(mut y) = *x {
+            x.replace(y.update());
+            dbg!(*x);
+        } else {
+            return -1
+        }
+    } else {
+        return -2
     }
-    let x = (*RAW_DATA).lock().unwrap().unwrap().x;
-    *RAW_DATA.lock().unwrap() = Some(SecretData{x: x + 1});
-    
     0
 }
 
 // Sealして出力
 #[no_mangle]
 pub extern "C" fn save(sealed_dest: * mut u8, sealed_dest_size: u32) -> i64 {
-    if (*RAW_DATA).lock().unwrap().is_none() {
-        return -1;
-    }
+    eprintln!("save(dest: {:?}, size: {})", sealed_dest, sealed_dest_size);
+    let secret = match SECRET.lock() {
+        Ok(x) => match *x {
+            None => return -1,
+            Some(y) => y
+        },
+        Err(_) => return -2
+    };
+    dbg!(&secret);
     let add: [u8; 0] = [0_u8; 0]; // additional dataは使わない
-    let raw_data = (*RAW_DATA).lock().unwrap().unwrap();
-    let sealed_data = SgxSealedData::<SecretData>::seal_data(&add, &raw_data).unwrap();
+    let sealed_data = if let Ok(x) = SgxSealedData::<SecretData>::seal_data(&add, &secret) { x } else { return -4 };
     // TODO: カウンタを追加
     unsafe {
-        sealed_data.to_raw_sealed_data_t(sealed_dest as * mut sgx_sealed_data_t, sealed_dest_size);
-        0
+        let sealed_dest = sealed_dest as * mut sgx_sealed_data_t;
+        if let None = sealed_data.to_raw_sealed_data_t(sealed_dest, sealed_dest_size) { return -5; }
     }
+    2048 // TODO: sealed_dataの大きさを返す
 }
 
 // Sealされたデータを読み込み
 #[no_mangle]
-pub extern "C" fn restore(sealed_src: * mut u8, sealed_src_size: u32) -> i64 {
-    if (*RAW_DATA).lock().unwrap().is_some() {
-        return -1;
-    }
+pub extern "C" fn restore(sealed_src: * const u8, sealed_src_size: u32) -> i64 {
+    eprintln!("restore(src: {:?}, size: {})", sealed_src, sealed_src_size);
+    let mut secret = match SECRET.lock() {
+        Ok(x) => if let None = *x { x } else { return -1 },
+        Err(_) => return -2
+    };
+    // TODO: カウンタを検証
     unsafe {
-        // TODO: カウンタを検証
-        let sealed_data = SgxSealedData::<SecretData>::from_raw_sealed_data_t(sealed_src as * mut sgx_sealed_data_t, sealed_src_size).unwrap();
-        *RAW_DATA.lock().unwrap() = Some(*sealed_data.unseal_data().unwrap().get_decrypt_txt());
-        0
+        let sealed_src = sealed_src as * mut sgx_sealed_data_t;
+        let sealed_data = if let Some(x) = SgxSealedData::<SecretData>::from_raw_sealed_data_t(sealed_src, sealed_src_size) { x } else { return -3 };
+        let unsealed_data = if let Ok(x) = sealed_data.unseal_data() { x } else { return -4 };
+        *secret = Some(*unsealed_data.get_decrypt_txt());
     }
+    dbg!(&secret);
+    0
 }
 

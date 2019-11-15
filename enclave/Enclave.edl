@@ -42,7 +42,7 @@ enclave {
 	public int64_t update();
 	public int64_t get_raw_data([out, count=dest_size] char *dest, size_t dest_size);
 	public int64_t save([out, count=sealed_dest_size] uint8_t *sealed_dest, uint32_t sealed_dest_size);
-	public int64_t restore([in, count=sealed_src_size] uint8_t *sealed_src, uint32_t sealed_src_size);
+	public int64_t restore([in, count=sealed_src_size] const uint8_t *sealed_src, uint32_t sealed_src_size);
 
     };
 };
