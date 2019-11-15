@@ -33,8 +33,7 @@ extern crate dirs;
 
 use sgx_types::*;
 use sgx_urts::SgxEnclave;
-use std::io::{Read, Write};
-use std::result::Result;
+use std::io::{Read, Write, Seek, SeekFrom};
 use std::fs;
 use std::fs::OpenOptions;
 use std::path;
@@ -54,7 +53,7 @@ extern {
     fn restore(eid: sgx_enclave_id_t, retval: * mut i64, sealed_src: * const u8, sealed_src_size: u32) -> sgx_status_t;
 }
 
-fn main() -> Result<(), std::io::Error> {
+fn main() -> std::io::Result<()> {
     let enclave = init_enclave().expect("init_enclave failed!");
     let mut r = 0_i64;
 
@@ -72,11 +71,11 @@ fn main() -> Result<(), std::io::Error> {
             if r != 0 {
                 panic!("initialize failed (returned {})", r);
             }
-            fs::File::create(DATA_FILE)?
+            OpenOptions::new().write(true).append(false).create(true).open(DATA_FILE)?
         }
     };
 
-    for _ in 0..2 {
+    for _ in 0..3 {
         unsafe { update(enclave.geteid(), &mut r); }
         if r != 0 { eprintln!("update failed (returned {})", r); }
     }
@@ -91,7 +90,7 @@ fn main() -> Result<(), std::io::Error> {
     let mut sealed_data = vec![0_u8; 2048];
     loop {
         unsafe { save(enclave.geteid(), &mut r, sealed_data.as_mut_ptr(), sealed_data.len() as u32); }
-        if r < 0 || sealed_data.len() < r.try_into().unwrap() {
+        if r < 0 {
             panic!("save failed (returned {})", r);
         }
         let data_size = r.try_into().unwrap();
@@ -101,6 +100,8 @@ fn main() -> Result<(), std::io::Error> {
         if data_size <= vec_size { break; }
         eprintln!("retrying save");
     }
+    data_file.seek(SeekFrom::Start(0))?;
+    data_file.set_len(0)?;
     data_file.write_all(&sealed_data)?;
 
     enclave.destroy();

@@ -52,6 +52,7 @@ use libc::c_char;
 use std::ffi::CStr;
 use std::str;
 use std::ptr;
+use std::convert::TryInto;
 
 extern crate serde;
 use serde::{Serialize, Deserialize};
@@ -151,7 +152,7 @@ pub extern "C" fn save(sealed_dest: * mut u8, sealed_dest_size: u32) -> i64 {
         let sealed_dest = sealed_dest as * mut sgx_sealed_data_t;
         if let None = sealed_data.to_raw_sealed_data_t(sealed_dest, sealed_dest_size) { return -5; }
     }
-    2048 // TODO: sealed_dataの大きさを返す
+    (std::mem::size_of::<sgx_sealed_data_t>() + std::mem::size_of::<SecretData>()).try_into().unwrap()
 }
 
 // Sealされたデータを読み込み
