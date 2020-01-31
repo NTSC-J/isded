@@ -1,116 +1,140 @@
 // Copyright (C) 2019 Fuga Kato
-// Copyright (C) 2017-2019 Baidu, Inc. All Rights Reserved.
-//
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions
-// are met:
-//
-//  * Redistributions of source code must retain the above copyright
-//    notice, this list of conditions and the following disclaimer.
-//  * Redistributions in binary form must reproduce the above copyright
-//    notice, this list of conditions and the following disclaimer in
-//    the documentation and/or other materials provided with the
-//    distribution.
-//  * Neither the name of Baidu, Inc., nor the names of its
-//    contributors may be used to endorse or promote products derived
-//    from this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#![allow(non_upper_case_globals)]
+#![allow(non_camel_case_types)]
+#![allow(non_snake_case)]
+#![allow(improper_ctypes)]
+include!(concat!(env!("OUT_DIR"), "/Enclave_u.rs"));
+
+extern crate common;
 extern crate sgx_types;
 extern crate sgx_urts;
 extern crate dirs;
+#[macro_use]
+extern crate clap;
+extern crate memmap;
+extern crate serde_json;
 
+use common::structs::*;
 use sgx_types::*;
 use sgx_urts::SgxEnclave;
-use std::io::{Read, Write, Seek, SeekFrom};
+use std::io::{Read, Write};
 use std::fs;
 use std::fs::OpenOptions;
-use std::path;
 use std::ffi::CString;
+use std::path;
+use memmap::{MmapOptions, MmapMut};
 use std::convert::TryInto;
+use clap::{Arg,ArgMatches,SubCommand};
 
 static ENCLAVE_FILE: &'static str = "enclave.signed.so";
 static ENCLAVE_TOKEN: &'static str = "enclave.token";
-static DATA_FILE: &'static str = "sealeddata.bin";
-
-// TODO: bindgenでこのブロックを自動生成
-extern {
-    fn initialize(eid: sgx_enclave_id_t, retval: * mut i64, json: * const c_char) -> sgx_status_t;
-    fn update(eid: sgx_enclave_id_t, retval: * mut i64) -> sgx_status_t;
-    fn get_raw_data(eid: sgx_enclave_id_t, retval: * mut i64, dest: * mut u8, dest_size: usize) -> sgx_status_t;
-    fn save(eid: sgx_enclave_id_t, retval: * mut i64, sealed_dest: * mut u8, sealed_dest_size: u32) -> sgx_status_t;
-    fn restore(eid: sgx_enclave_id_t, retval: * mut i64, sealed_src: * const u8, sealed_src_size: u32) -> sgx_status_t;
-}
 
 fn main() -> std::io::Result<()> {
+    let app = clap::app_from_crate!()
+        .subcommand(SubCommand::with_name("open")
+                    .about("open a self-destructing file")
+                    .arg(Arg::with_name("input")
+                         .help("the name of the input file")
+                         .index(1)
+                         .required(true)))
+        .subcommand(SubCommand::with_name("create")
+                    .about("create a self-destructing file locally")
+                    .arg(Arg::with_name("input")
+                         .help("the name of the input file")
+                         .short("i")
+                         .long("input")
+                         .takes_value(true)
+                         .required(true))
+                    .arg(Arg::with_name("output")
+                         .help("the name of the file to create")
+                         .short("o")
+                         .long("output")
+                         .takes_value(true)
+                         .required(true))
+                    .arg(Arg::with_name("access-count")
+                         .help("how many times the file can be opened")
+                         .short("n")
+                         .long("access-count")
+                         .takes_value(true))
+                    .arg(Arg::with_name("after")
+                         .help("when the file becomes available")
+                         .short("a")
+                         .long("after")
+                         .takes_value(true))
+                    .arg(Arg::with_name("before")
+                         .help("when the file becomes unavailable")
+                         .short("b")
+                         .long("before")
+                         .takes_value(true)))
+        .arg(Arg::with_name("version")
+             .help("display app version")
+             .long("version"));
+    let matches = app.get_matches();
+
+    if let Some(matches) = matches.subcommand_matches("open") {
+        return subcommand_open(matches);
+    }
+
+    if let Some(matches) = matches.subcommand_matches("create") {
+        return subcommand_create(matches);
+    }
+
+    if let Some(_) = matches.value_of("version") {
+        println!("{} version {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+    }
+
+    Ok(())
+}
+
+fn subcommand_open(matches: &ArgMatches) -> std::io::Result<()> {
+    let filename = matches.value_of("input").unwrap();
     let enclave = init_enclave().expect("init_enclave failed!");
-    let mut r = 0_i64;
+    let file = OpenOptions::new().read(true).write(true).append(false).open(filename)?;
 
-    let mut data_file = match OpenOptions::new().read(true).write(true).append(false).open(DATA_FILE) {
-        Ok(mut f) => {
-            let mut sealed_data = Vec::new();
-            f.read_to_end(&mut sealed_data)?;
-            unsafe { restore(enclave.geteid(), &mut r, sealed_data.as_ptr(), sealed_data.len() as u32); }
-            if r != 0 { eprintln!("restore failed (returned {})", r); }
-            f
-        },
-        Err(_) => {
-            let json = CString::new("{\"x\": 0}")?;
-            unsafe { initialize(enclave.geteid(), &mut r, json.as_ptr()); }
-            if r != 0 {
-                panic!("initialize failed (returned {})", r);
-            }
-            OpenOptions::new().write(true).append(false).create(true).open(DATA_FILE)?
-        }
-    };
-
-    for _ in 0..3 {
-        unsafe { update(enclave.geteid(), &mut r); }
-        if r != 0 { eprintln!("update failed (returned {})", r); }
+    unsafe {
+        let mut r = 0;
+        let mmap = MmapOptions::new().map(&file)?;
+        load_file(enclave.geteid(), &mut r, mmap.as_ptr(), file.metadata()?.len().try_into().unwrap());
     }
-
-    let mut raw_json: Vec<u8> = vec![0_u8; 2048];
-    unsafe { get_raw_data(enclave.geteid(), &mut r, raw_json.as_mut_ptr(), raw_json.len()); }
-    if r < 0 {
-        panic!("get_raw_data failed (returned {})", r);
-    }
-    println!("raw json: {}", String::from_utf8(raw_json).unwrap());
-
-    let mut sealed_data = vec![0_u8; 2048];
-    loop {
-        unsafe { save(enclave.geteid(), &mut r, sealed_data.as_mut_ptr(), sealed_data.len() as u32); }
-        if r < 0 {
-            panic!("save failed (returned {})", r);
-        }
-        let data_size = r.try_into().unwrap();
-        let vec_size = sealed_data.len();
-        sealed_data.resize(data_size, 0_u8);
-        eprintln!("sealed data size: {}", data_size);
-        if data_size <= vec_size { break; }
-        eprintln!("retrying save");
-    }
-    data_file.seek(SeekFrom::Start(0))?;
-    data_file.set_len(0)?;
-    data_file.write_all(&sealed_data)?;
 
     enclave.destroy();
 
     Ok(())
 }
 
-fn init_enclave() -> SgxResult<SgxEnclave> {
+fn subcommand_create(matches: &ArgMatches) -> std::io::Result<()> {
+    let input_name = matches.value_of("input").unwrap();
+    let output_name = matches.value_of("output").unwrap();
+    let enclave = init_enclave().expect("init_enclave failed!");
 
+    let input_file = OpenOptions::new().read(true).open(input_name)?;
+    let secret_metadata = SecretMetadata {
+        output_condition: OutputCondition {
+            time: None,
+            access_count: None
+        },
+        access_count: 0,
+        name: input_name
+    };
+
+    unsafe {
+        let metadata_json = CString::new(serde_json::to_string(&secret_metadata)?)?.as_ptr();
+        let input_map = MmapOptions::new().map(&input_file)?.as_ptr();
+        let input_size = input_file.metadata()?.len();
+        let mut output_size = 0;
+        create_file(enclave.geteid(), &mut output_size, metadata_json, input_map, input_size);
+
+        let output_file = OpenOptions::new().read(true).write(true).create(true).open(output_name)?;
+        output_file.set_len(output_size)?;
+        let output_map = MmapMut::map_mut(&output_file)?.as_mut_ptr();
+        let mut r = 0;
+        save_file(enclave.geteid(), &mut r, output_map);
+    }
+    Ok(())
+}
+
+fn init_enclave() -> SgxResult<SgxEnclave> {
     let mut launch_token: sgx_launch_token_t = [0; 1024];
     let mut launch_token_updated: i32 = 0;
     // Step 1: try to retrieve the launch token saved by last transaction

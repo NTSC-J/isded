@@ -26,7 +26,10 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+extern crate bindgen;
+
 use std::env;
+use std::path::PathBuf;
 
 fn main () {
 
@@ -44,4 +47,15 @@ fn main () {
         "HW" => println!("cargo:rustc-link-lib=dylib=sgx_urts"),
         _    => println!("cargo:rustc-link-lib=dylib=sgx_urts"), // Treat undefined as HW
     }
+
+    println!("cargo:rerun-if-changed=Enclave_u.h");
+    let bindings = bindgen::Builder::default()
+        .header("Enclave_u.h")
+        .clang_arg(format!("-I{}/include", sdk_dir))
+        .clang_arg("-I../../../edl")
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks))
+        .generate()
+        .expect("Unable to generate bindings");
+    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+    bindings.write_to_file(out_path.join("Enclave_u.rs")).expect("Couldn't write bindings!");
 }
