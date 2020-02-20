@@ -3,6 +3,7 @@ name = "app"
 version = "1.0.0"
 authors = ["Baidu", "Fuga Kato"]
 build = "build.rs"
+edition = '2018'
 
 [build-dependencies]
 bindgen = "0.52"
@@ -15,6 +16,7 @@ dirs = "1.0.2"
 clap = "2.20.3"
 memmap = "0.6.2"
 serde_json = "1.0.44"
+failure = "0.1.6"
 
 [patch.'https://github.com/baidu/rust-sgx-sdk.git']
 sgx_types = { path = "../../../sgx_types" }

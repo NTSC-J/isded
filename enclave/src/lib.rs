@@ -1,33 +1,21 @@
-//#![crate_name = "selfdestructionenclave"]
-//#![crate_type = "staticlib"]
-
 #![cfg_attr(not(target_env = "sgx"), no_std)]
 #![cfg_attr(target_env = "sgx", feature(rustc_private))]
 
-extern crate sgx_types;
 #[cfg(not(target_env = "sgx"))]
-#[allow(unused_imports)]
 #[macro_use]
 extern crate sgx_tstd as std;
 
-extern crate sgx_tseal;
-#[macro_use]
-extern crate lazy_static;
-extern crate libc;
-extern crate serde;
-extern crate serde_json;
-
-use sgx_types::*;
-use sgx_types::marker::ContiguousMemory;
-use std::sync::SgxMutex;
+//mod error;
+mod s_expression;
+mod output_policy;
+use sgx_types::sgx_status_t;
+//use sgx_types::marker::ContiguousMemory;
+//use std::sync::SgxMutex;
 use libc::c_char;
 use std::ffi::CStr;
-use std::str;
-use std::ptr;
-use std::convert::TryInto;
-use std::time;
-use sgx_tseal::SgxSealedData;
-use serde::{Serialize, Deserialize};
+//use std::convert::TryInto;
+//use std::time;
+//use sgx_tseal::SgxSealedData;
 
 //impl SecretData {
 //    fn output_allowed(&self) -> Boolean {
@@ -62,14 +50,18 @@ pub extern "C" fn load_file(buf: * const u8, size: u64) -> sgx_status_t {
 
 // ローカルにファイルを作る
 // 戻り値: サイズ（エラーの際は負値）
+#[no_mangle]
 pub extern "C" fn create_file(policy_sexp: * const c_char, input: * const u8, input_size: u64) -> u64 {
     eprintln!("create_file(policy_sexp: {:?}, input: {:?}, input_size: {})", policy_sexp, input, input_size);
-    let policy_sexp = CStr::from_ptr(policy_sexp).to_str().unwrap();
-    0
+    let policy_sexp = unsafe { CStr::from_ptr(policy_sexp).to_str().expect("error converting from C string") };
+    output_policy::validate(policy_sexp).expect("invalid policy!");
+    1024
 }
 
 // ファイルを書き込む
+#[no_mangle]
 pub extern "C" fn save_file(output: * mut u8) -> sgx_status_t {
+    output;
     sgx_status_t::SGX_SUCCESS
 }
 

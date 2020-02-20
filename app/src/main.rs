@@ -6,16 +6,6 @@
 #![allow(improper_ctypes)]
 include!(concat!(env!("OUT_DIR"), "/Enclave_u.rs"));
 
-extern crate common;
-extern crate sgx_types;
-extern crate sgx_urts;
-extern crate dirs;
-#[macro_use]
-extern crate clap;
-extern crate memmap;
-extern crate serde_json;
-
-use common::structs::*;
 use sgx_types::*;
 use sgx_urts::SgxEnclave;
 use std::io::{Read, Write};
@@ -25,13 +15,15 @@ use std::ffi::CString;
 use std::path;
 use memmap::{MmapOptions, MmapMut};
 use std::convert::TryInto;
-use clap::{Arg,ArgMatches,SubCommand};
+use clap::*;
+use failure::Error;
+use std::result::Result;
 
 static ENCLAVE_FILE: &'static str = "enclave.signed.so";
 static ENCLAVE_TOKEN: &'static str = "enclave.token";
 
-fn main() -> std::io::Result<()> {
-    let app = clap::app_from_crate!()
+fn main() -> Result<(), Error> {
+    let app = app_from_crate!()
         .subcommand(SubCommand::with_name("open")
                     .about("open a self-destructing file")
                     .arg(Arg::with_name("input")
@@ -47,26 +39,17 @@ fn main() -> std::io::Result<()> {
                          .takes_value(true)
                          .required(true))
                     .arg(Arg::with_name("output")
-                         .help("the name of the file to create")
+                         .help("the name of the output file (default: <input file name>.sd)")
                          .short("o")
                          .long("output")
                          .takes_value(true)
-                         .required(true))
-                    .arg(Arg::with_name("access-count")
-                         .help("how many times the file can be opened")
-                         .short("n")
-                         .long("access-count")
-                         .takes_value(true))
-                    .arg(Arg::with_name("after")
-                         .help("when the file becomes available")
-                         .short("a")
-                         .long("after")
-                         .takes_value(true))
-                    .arg(Arg::with_name("before")
-                         .help("when the file becomes unavailable")
-                         .short("b")
-                         .long("before")
-                         .takes_value(true)))
+                         .required(false))
+                    .arg(Arg::with_name("policy")
+                         .help("the policy")
+                         .short("p")
+                         .long("policy")
+                         .takes_value(true)
+                         .required(true)))
         .arg(Arg::with_name("version")
              .help("display app version")
              .long("version"));
@@ -87,7 +70,7 @@ fn main() -> std::io::Result<()> {
     Ok(())
 }
 
-fn subcommand_open(matches: &ArgMatches) -> std::io::Result<()> {
+fn subcommand_open(matches: &ArgMatches) -> Result<(), Error> {
     let filename = matches.value_of("input").unwrap();
     let enclave = init_enclave().expect("init_enclave failed!");
     let file = OpenOptions::new().read(true).write(true).append(false).open(filename)?;
@@ -103,27 +86,21 @@ fn subcommand_open(matches: &ArgMatches) -> std::io::Result<()> {
     Ok(())
 }
 
-fn subcommand_create(matches: &ArgMatches) -> std::io::Result<()> {
-    let input_name = matches.value_of("input").unwrap();
-    let output_name = matches.value_of("output").unwrap();
+fn subcommand_create(matches: &ArgMatches) -> Result<(), Error> {
     let enclave = init_enclave().expect("init_enclave failed!");
+    let input_name = matches.value_of("input").unwrap();
+    let default_output = format!("{}.sd", input_name);
+    let output_name = matches.value_of("output").unwrap_or(default_output.as_str());
+    let policy = matches.value_of("policy").unwrap();
 
     let input_file = OpenOptions::new().read(true).open(input_name)?;
-    let secret_metadata = SecretMetadata {
-        output_condition: OutputCondition {
-            time: None,
-            access_count: None
-        },
-        access_count: 0,
-        name: input_name
-    };
 
     unsafe {
-        let metadata_json = CString::new(serde_json::to_string(&secret_metadata)?)?.as_ptr();
+        let policy = CString::new(policy)?;
         let input_map = MmapOptions::new().map(&input_file)?.as_ptr();
         let input_size = input_file.metadata()?.len();
         let mut output_size = 0;
-        create_file(enclave.geteid(), &mut output_size, metadata_json, input_map, input_size);
+        create_file(enclave.geteid(), &mut output_size, policy.as_ptr(), input_map, input_size);
 
         let output_file = OpenOptions::new().read(true).write(true).create(true).open(output_name)?;
         output_file.set_len(output_size)?;
@@ -154,7 +131,7 @@ fn init_enclave() -> SgxResult<SgxEnclave> {
         }
     };
 
-    let token_file: path::PathBuf = home_dir.join(ENCLAVE_TOKEN);;
+    let token_file: path::PathBuf = home_dir.join(ENCLAVE_TOKEN);
     if use_token == true {
         match fs::File::open(&token_file) {
             Err(_) => {
@@ -176,11 +153,11 @@ fn init_enclave() -> SgxResult<SgxEnclave> {
     // Debug Support: set 2nd parameter to 1
     let debug = 1;
     let mut misc_attr = sgx_misc_attribute_t {secs_attr: sgx_attributes_t { flags:0, xfrm:0}, misc_select:0};
-    let enclave = try!(SgxEnclave::create(ENCLAVE_FILE,
-                                          debug,
-                                          &mut launch_token,
-                                          &mut launch_token_updated,
-                                          &mut misc_attr));
+    let enclave = SgxEnclave::create(ENCLAVE_FILE,
+                                     debug,
+                                     &mut launch_token,
+                                     &mut launch_token_updated,
+                                     &mut misc_attr)?;
 
     // Step 3: save the launch token if it is updated
     if use_token == true && launch_token_updated != 0 {

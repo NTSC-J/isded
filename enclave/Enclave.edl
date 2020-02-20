@@ -9,8 +9,8 @@ enclave {
 
     trusted {
     	// Rustのstd::fs::Fileはusizeではなくu64でファイルサイズを表す
-	public sgx_status_t load_file([user_check] const uint8_t *file, uint64_t file_size);
-	public uint64_t create_file([in, string] const char *cond_sexp, [user_check] const uint8_t *input, uint64_t input_size);
+	public sgx_status_t load_file([user_check] const uint8_t *buf, uint64_t size);
+	public uint64_t create_file([in, string] const char *policy_sexp, [user_check] const uint8_t *input, uint64_t input_size);
 	public sgx_status_t save_file([user_check] uint8_t *output);
     };
 };

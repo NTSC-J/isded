@@ -1,10 +1,10 @@
 use std::prelude::v1::*;
 use std::vec::Vec;
-use std::env;
 use std::str::Chars;
 use std::iter::Peekable;
+use failure::{bail, Error};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Token {
     LParen,
     RParen,
@@ -17,36 +17,31 @@ pub struct Lexer<'a> {
 }
 impl<'a> Lexer<'a> {
     pub fn new(s: &str) -> Lexer {
-        Lexer{data: s.chars().peekable().clone()}
+        Lexer {
+            data: s.chars().peekable().clone(),
+        }
     }
 }
 impl<'a> Iterator for Lexer<'a> {
     type Item = Token;
 
     fn next(&mut self) -> Option<Token> {
-        if let Some(c) = self.data.next() {
-            match c {
-                '(' => Some(Token::LParen),
-                ')' => Some(Token::RParen),
-                '.' => Some(Token::Dot),
-                ' ' | '\t' | '\n' => self.next(),
-                x => {
-                    let mut atom = x.to_string();
-                    loop {
-                        if let Some(d) = self.data.peek() {
-                            match d {
-                                '(' | ')' | ' ' | '\t' | '\n' => return Some(Token::Atom(atom)),
-                                _ => atom.push(self.data.next().unwrap()) // == d
-                            }
-                        } else {
-                            return Some(Token::Atom(atom))
-                        }
+        self.data.next().and_then(|c| match c {
+            '(' => Some(Token::LParen),
+            ')' => Some(Token::RParen),
+            '.' => Some(Token::Dot),
+            ' ' | '\t' | '\n' => self.next(),
+            c => {
+                let mut atom = c.to_string();
+                loop {
+                    match self.data.peek() {
+                        Some(&d) if "() \t\n".contains(d) => return Some(Token::Atom(atom)),
+                        None => return Some(Token::Atom(atom)),
+                        Some(_) => atom.push(self.data.next().unwrap()), // == d
                     }
                 }
             }
-        } else {
-            None
-        }
+        })
     }
 }
 
@@ -54,66 +49,57 @@ impl<'a> Iterator for Lexer<'a> {
 pub enum S {
     Atom(String),
     List(Vec<S>), // nilは空のリストになる
-    Invalid(String)
 }
 impl S {
-    pub fn parse_str(data: &str) -> S {
+    pub fn parse_str(data: &str) -> Result<S, Error> {
         S::parse(&mut Lexer::new(data).peekable())
     }
-    pub fn parse(lexer: &mut Peekable<Lexer>) -> S {
+    pub fn parse(lexer: &mut Peekable<Lexer>) -> Result<S, Error> {
         if let Some(l) = lexer.next() {
             match l {
                 Token::LParen => S::get_list(lexer),
-                Token::Atom(x) => S::Atom(x),
-                _ => S::Invalid("unexpected token".to_string())
+                Token::Atom(x) => Ok(S::Atom(x)),
+                _ => bail!("unexpected token"),
             }
         } else {
-            S::Invalid("early EOF".to_string())
+            bail!("early EOF")
         }
     }
-    fn get_list(lexer: &mut Peekable<Lexer>) -> S {
+    fn get_list(lexer: &mut Peekable<Lexer>) -> Result<S, Error> {
         let mut list = Vec::<S>::new();
-        if let Some(car) = lexer.peek() {
-            match car {
-                Token::RParen => {
-                    lexer.next(); // )
-                    return S::List(list) // nil
-                },
-                _ => {
-                    list.push(S::parse(lexer)); // car
-                    if let Some(n) = lexer.peek() {
-                        match n {
-                            Token::Dot => {
-                                lexer.next(); // .
-                                match S::parse(lexer) { // cdr
-                                    S::List(x) => {
-                                        list.extend(x);
-                                    },
-                                    x => {
-                                        list.push(x);
-                                    }
-                                }
-                                match lexer.next() {
-                                    Some(Token::RParen) => {},
-                                    _ => list.push(S::Invalid("expected )".to_string()))
-                                }
-                            },
-                            _ => {
-                                match S::get_list(lexer) {
-                                    S::List(cdr) => list.extend(cdr),
-                                    x => list.push(x) // Invalid
-                                }
-                            }
+        match lexer.peek() {
+            Some(Token::RParen) => {
+                lexer.next(); // )
+                              // nil
+            }
+            Some(_) => {
+                list.push(S::parse(lexer)?); // car
+                match lexer.peek() {
+                    Some(Token::Dot) => {
+                        lexer.next(); // .
+                        match S::parse(lexer) {
+                            // cdr
+                            Ok(S::List(x)) => list.extend(x),
+                            Ok(x) => list.push(x),
+                            e => return e,
                         }
-                    } else {
-                        return S::Invalid("early EOF in list".to_string())
+                        if lexer.next() != Some(Token::RParen) {
+                            bail!("expected )");
+                        }
                     }
+                    Some(_) => {
+                        match S::get_list(lexer) {
+                            Ok(S::List(cdr)) => list.extend(cdr),
+                            Ok(x) => list.push(x), // Invalid
+                            e => return e,
+                        }
+                    }
+                    None => bail!("early EOF in list"),
                 }
             }
-        } else {
-            return S::Invalid("early EOF in list".to_string())
+            None => bail!("early EOF in list"),
         }
-        S::List(list)
+        Ok(S::List(list))
     }
 }
 
