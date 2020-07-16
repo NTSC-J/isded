@@ -42,10 +42,16 @@ fn main () {
     println!("cargo:rustc-link-lib=static=Enclave_u");
 
     println!("cargo:rustc-link-search=native={}/lib64", sdk_dir);
+    println!("cargo:rustc-link-lib=sgx_uprotected_fs");
     match is_sim.as_ref() {
-        "SW" => println!("cargo:rustc-link-lib=dylib=sgx_urts_sim"),
-        "HW" => println!("cargo:rustc-link-lib=dylib=sgx_urts"),
-        _    => println!("cargo:rustc-link-lib=dylib=sgx_urts"), // Treat undefined as HW
+        "SW" => {
+            println!("cargo:rustc-link-lib=dylib=sgx_urts_sim");
+            println!("cargo:rustc-link-lib=dylib=sgx_uae_service_sim");
+        },
+        _    => { // Treat undefined as HW
+            println!("cargo:rustc-link-lib=dylib=sgx_urts");
+            println!("cargo:rustc-link-lib=dylib=sgx_uae_service");
+        },
     }
 
     println!("cargo:rerun-if-changed=Enclave_u.h");

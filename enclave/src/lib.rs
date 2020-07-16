@@ -5,63 +5,96 @@
 #[macro_use]
 extern crate sgx_tstd as std;
 
-//mod error;
 mod s_expression;
 mod output_policy;
 use sgx_types::sgx_status_t;
-//use sgx_types::marker::ContiguousMemory;
-//use std::sync::SgxMutex;
 use libc::c_char;
 use std::ffi::CStr;
-//use std::convert::TryInto;
-//use std::time;
-//use sgx_tseal::SgxSealedData;
+use std::ffi::CString;
+use std::io::{copy, stdout, Read, Write};
+use std::vec::Vec;
+use sgx_tprotected_fs::SgxFileStream;
+use std::untrusted::fs::File;
 
-//impl SecretData {
-//    fn output_allowed(&self) -> Boolean {
-//        if let Some(t) = output_condition.time {
-//            return false; // TODO
-//        }
-//        if let Some(t) = output_condition.access_count && t <= access_count {
-//            return false;
-//        }
-//        true
-//    }
-//}
-//
-//lazy_static! {
-//    static ref SECRET: SgxMutex<Option<SecretData>> = SgxMutex::new(None);
-//}
+// std::io::copy()が使えるように、Read, Writeを実装
+struct MySgxFileStream {
+    file: SgxFileStream
+}
+impl Read for MySgxFileStream {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.file.read(buf).map_err(|x| { std::io::Error::from_raw_os_error(x) })
+    }
+}
+impl Write for MySgxFileStream {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.file.write(buf).map_err(|x| { std::io::Error::from_raw_os_error(x) })
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.file.flush().map_err(|x| { std::io::Error::from_raw_os_error(x) })
+    }
+}
+impl From<SgxFileStream> for MySgxFileStream {
+    fn from(file: SgxFileStream) -> Self {
+        MySgxFileStream {
+            file: file
+        }
+    }
+}
 
 // ローカルのファイルを読み込み
 #[no_mangle]
-pub extern "C" fn load_file(buf: * const u8, size: u64) -> sgx_status_t {
-    eprintln!("load_file(buf: {:?}, size: {})", buf, size);
-//    let mut secret = if let Ok(x) = SECRET.lock() { x } else { return SGX_ERROR_INVALID_STATE };
-//    unsafe {
-//        let buf = buf as * mut sgx_sealed_data_t; // なぜmut?
-//        let sealed_data = if let Some(x) = SgxSealedData::<SecretData>::from_raw_sealed_data_t(buf, size) { x } else { return SGX_ERROR_FILE_BAD_STATUS };
-//        let unsealed_data = match sealed_data.unseal_data() { Ok(x) => x, Err(e) => return e };
-//        *secret = Some(*unseal_data.get_decrypt_txt());
-//        dbg!(&secret);
-//    }
+pub extern "C" fn open_file(filename: * const c_char) -> sgx_status_t {
+    let filename = unsafe { CStr::from_ptr(filename) };
+    let r = CString::new("r").unwrap();
+    let file = SgxFileStream::open_auto_key(filename, &r).expect("failed to open file");
+    
+    let mut policy_len: [u8; 8] = [0; 8];
+    if 8 != file.read(&mut policy_len).expect("failed to read policy length") {
+        panic!("file ended while reading policy length");
+    }
+    let policy_len = usize::from_le_bytes(policy_len);
+    let mut policy: Vec<u8> = vec![0; policy_len];
+    if policy.len() != file.read(&mut policy).expect("failed to read policy") {
+        panic!("file ended while reading policy");
+    }
+    let policy = std::str::from_utf8(&policy).expect("invalid utf8");
+
+    if output_policy::output_allowed(policy) {
+        let mut data_len: [u8; 8] = [0; 8];
+        if 8 != file.read(&mut data_len).expect("failed to read data length") {
+            panic!("file ended while reading data length");
+        }
+        //let data_len = usize::from_le_bytes(data_len);
+        // FIXME: データの長さを無視している
+        copy(&mut MySgxFileStream::from(file), &mut stdout()).expect("failed to output");
+    } else {
+        eprintln!("access forbidden");
+    }
+    // TODO: MCを更新
+
     sgx_status_t::SGX_SUCCESS
 }
 
 // ローカルにファイルを作る
-// 戻り値: サイズ（エラーの際は負値）
 #[no_mangle]
-pub extern "C" fn create_file(policy_sexp: * const c_char, input: * const u8, input_size: u64) -> u64 {
-    eprintln!("create_file(policy_sexp: {:?}, input: {:?}, input_size: {})", policy_sexp, input, input_size);
-    let policy_sexp = unsafe { CStr::from_ptr(policy_sexp).to_str().expect("error converting from C string") };
-    output_policy::validate(policy_sexp).expect("invalid policy!");
-    1024
-}
+pub extern "C" fn create_file(policy: * const c_char, input_filename: * const c_char, output_filename: * const c_char) -> sgx_status_t {
+    let policy = unsafe { CStr::from_ptr(policy).to_str().expect("error converting from C string") };
+    let input_filename = unsafe { CStr::from_ptr(input_filename).to_str().expect("error converting from C string") };
+    let output_filename = unsafe { CStr::from_ptr(output_filename) };
 
-// ファイルを書き込む
-#[no_mangle]
-pub extern "C" fn save_file(output: * mut u8) -> sgx_status_t {
-    output;
+    output_policy::validate(policy).expect("invalid policy");
+
+    let mut input_file = File::open(&input_filename).expect("failed to open input file");
+    let w = CString::new("w").unwrap();
+    let output_file = SgxFileStream::open_auto_key(output_filename, &w).expect("failed to open output file");
+    output_file.write(&policy.len().to_le_bytes()).expect("failed to write policy length"); // usize; 8 bytes on target
+    output_file.write(policy.as_bytes()).expect("failed to write policy");
+
+    let input_len = input_file.metadata().expect("failed to acquire metadata").len();
+    output_file.write(&input_len.to_le_bytes()).expect("failed to write data length");
+    // FIXME: ファイルサイズが変わるかもしれない
+    copy(&mut input_file, &mut MySgxFileStream::from(output_file)).expect("failed to write actual data");
+
     sgx_status_t::SGX_SUCCESS
 }
 

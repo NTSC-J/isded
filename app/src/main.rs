@@ -10,11 +10,8 @@ use sgx_types::*;
 use sgx_urts::SgxEnclave;
 use std::io::{Read, Write};
 use std::fs;
-use std::fs::OpenOptions;
 use std::ffi::CString;
 use std::path;
-use memmap::{MmapOptions, MmapMut};
-use std::convert::TryInto;
 use clap::*;
 use failure::Error;
 use std::result::Result;
@@ -71,14 +68,14 @@ fn main() -> Result<(), Error> {
 }
 
 fn subcommand_open(matches: &ArgMatches) -> Result<(), Error> {
-    let filename = matches.value_of("input").unwrap();
     let enclave = init_enclave().expect("init_enclave failed!");
-    let file = OpenOptions::new().read(true).write(true).append(false).open(filename)?;
+
+    let filename = matches.value_of("input").expect("specify the filename!");
 
     unsafe {
         let mut r = 0;
-        let mmap = MmapOptions::new().map(&file)?;
-        load_file(enclave.geteid(), &mut r, mmap.as_ptr(), file.metadata()?.len().try_into().unwrap());
+        let filename = CString::new(filename)?;
+        open_file(enclave.geteid(), &mut r, filename.as_ptr());
     }
 
     enclave.destroy();
@@ -88,25 +85,18 @@ fn subcommand_open(matches: &ArgMatches) -> Result<(), Error> {
 
 fn subcommand_create(matches: &ArgMatches) -> Result<(), Error> {
     let enclave = init_enclave().expect("init_enclave failed!");
-    let input_name = matches.value_of("input").unwrap();
-    let default_output = format!("{}.sd", input_name);
-    let output_name = matches.value_of("output").unwrap_or(default_output.as_str());
-    let policy = matches.value_of("policy").unwrap();
 
-    let input_file = OpenOptions::new().read(true).open(input_name)?;
+    let policy = matches.value_of("policy").expect("specify the policy!");
+    let input_name = matches.value_of("input").expect("specify the input!");
+    let default_output = format!("{}.sded", input_name);
+    let output_name = matches.value_of("output").unwrap_or(default_output.as_str());
 
     unsafe {
-        let policy = CString::new(policy)?;
-        let input_map = MmapOptions::new().map(&input_file)?.as_ptr();
-        let input_size = input_file.metadata()?.len();
-        let mut output_size = 0;
-        create_file(enclave.geteid(), &mut output_size, policy.as_ptr(), input_map, input_size);
-
-        let output_file = OpenOptions::new().read(true).write(true).create(true).open(output_name)?;
-        output_file.set_len(output_size)?;
-        let output_map = MmapMut::map_mut(&output_file)?.as_mut_ptr();
         let mut r = 0;
-        save_file(enclave.geteid(), &mut r, output_map);
+        let policy = CString::new(policy)?;
+        let input_name = CString::new(input_name)?;
+        let output_name = CString::new(output_name)?;
+        create_file(enclave.geteid(), &mut r, policy.as_ptr(), input_name.as_ptr(), output_name.as_ptr());
     }
     Ok(())
 }
@@ -121,28 +111,24 @@ fn init_enclave() -> SgxResult<SgxEnclave> {
     let mut home_dir = path::PathBuf::new();
     let use_token = match dirs::home_dir() {
         Some(path) => {
-            println!("[+] Home dir is {}", path.display());
             home_dir = path;
             true
         },
         None => {
-            println!("[-] Cannot get home dir");
+            println!("Cannot get home dir");
             false
         }
     };
 
     let token_file: path::PathBuf = home_dir.join(ENCLAVE_TOKEN);
-    if use_token == true {
+    if use_token {
         match fs::File::open(&token_file) {
             Err(_) => {
                 println!("[-] Open token file {} error! Will create one.", token_file.as_path().to_str().unwrap());
             },
             Ok(mut f) => {
-                println!("[+] Open token file success! ");
                 match f.read(&mut launch_token) {
-                    Ok(1024) => {
-                        println!("[+] Token file valid!");
-                    },
+                    Ok(1024) => {},
                     _ => println!("[+] Token file invalid, will create new token file"),
                 }
             }
@@ -160,13 +146,12 @@ fn init_enclave() -> SgxResult<SgxEnclave> {
                                      &mut misc_attr)?;
 
     // Step 3: save the launch token if it is updated
-    if use_token == true && launch_token_updated != 0 {
+    if use_token && launch_token_updated != 0 {
         // reopen the file with write capablity
         match fs::File::create(&token_file) {
             Ok(mut f) => {
-                match f.write_all(&launch_token) {
-                    Ok(()) => println!("[+] Saved updated launch token!"),
-                    Err(_) => println!("[-] Failed to save updated launch token!"),
+                if f.write_all(&launch_token).is_err() {
+                    println!("[-] Failed to save updated launch token!");
                 }
             },
             Err(_) => {

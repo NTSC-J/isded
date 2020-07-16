@@ -1,4 +1,4 @@
-// Copyright (C) 2019 Fuga Kato
+// Copyright (C) 2020 Fuga Kato
 
 // Receiver Enclave
 enclave {
@@ -6,12 +6,12 @@ enclave {
     from "sgx_stdio.edl" import *;
     from "sgx_backtrace.edl" import *;
     from "sgx_tstdc.edl" import *;
+    from "sgx_tprotected_fs.edl" import *;
 
     trusted {
-    	// Rustのstd::fs::Fileはusizeではなくu64でファイルサイズを表す
-	public sgx_status_t load_file([user_check] const uint8_t *buf, uint64_t size);
-	public uint64_t create_file([in, string] const char *policy_sexp, [user_check] const uint8_t *input, uint64_t input_size);
-	public sgx_status_t save_file([user_check] uint8_t *output);
+        public sgx_status_t open_file([in, string] const char *filename);
+        public sgx_status_t create_file([in, string] const char *policy_sexp,
+            [in, string] const char *input_filename, [in, string] const char *output_filename);
     };
 };
 
