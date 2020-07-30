@@ -1,0 +1,85 @@
+[env]
+ENCLAVE = "Enclave"
+ENCLAVE_EDL = "../enclave/${ENCLAVE}.edl"
+SGX_SDK = { value = "/opt/intel/sgxsdk", condition = { env_not_set = ["SGX_SDK"] } }
+SGX_MODE = { value = "HW", condition = { env_not_set = ["SGX_MODE"] } }
+SGX_ARCH = { value = "x64", condition = { env_not_set = ["SGX_ARCH"] } }
+ARCH_FLAG = { source = "${SGX_ARCH}", default_value = "-m64", mapping = {"x64" = "-m64", "x86" = "-m32"} }
+SGX_LIB_PATH = { source = "${SGX_ARCH}", default_value = "${SGX_SDK}/lib64", mapping = {"x64" = "${SGX_SDK}/lib64", "x86" = "${SGX_SDK}/lib"} }
+RUST_SGX_SDK = { value = "../../..", condition = { env_not_set = ["RUST_SGX_SDK"] } }
+OBJ_DIR = "obj"
+CC = { value = "gcc", condition = { env_not_set = ["CC"] } }
+CXX = { value = "g++", condition = { env_not_set = ["CXX"] } }
+AR = { value = "ar", condition = { env_not_set = ["AR"] } }
+URTS = { source = "${SGX_MODE}", default_value = "sgx_urts", mapping = {"HW" = "sgx_urts", "SIM" = "sgx_urts_sim"} }
+OPT_FLAG = { source = "${CARGO_MAKE_PROFILE}", default_value = "-Og", mapping = {"development" = "-Og", "production" = "-O2"} }
+DEBUG_FLAG = { value = "-g", condition = { profiles = ["development"] } }
+APP_INCLUDE = ["-I${RUST_SGX_SDK}/edl", "-I${RUST_SGX_SDK}/common/inc", "-I${SGX_SDK}/include", "-I${SGX_SDK}/include/tlibc", "-I${OBJ_DIR}"]
+APP_CFLAGS = ["${ARCH_FLAG}", "${OPT_FLAG}", "-fPIC", "-Wno-attributes"]
+OUT_DIR = { source = "${CARGO_MAKE_PROFILE}", default_value = "./target/debug", mapping = {"development" = "./target/debug", "production" = "./target/release"} }
+ENCLAVE_LIBS = ["-L${OUT_DIR}", "-l${RUST_OBJ}", "-l${TSERVICE}", "-lsgx_tcrypto", "-L${RUST_SGX_SDK}/compiler-rt", "-lcompiler-rt-patch"]
+ENCLAVE_LDFLAGS = ["${ARCH_FLAG}", "-Wl,--no-undefined", "-nostdlib", "-nodefaultlibs", "-nostartfiles", "-L${SGX_LIB_PATH}",
+	"-Wl,--whole-archive", "-l${TRTS}", "-Wl,--no-whole-archive",
+	"-Wl,--start-group", "-lsgx_tstdc", "-lsgx_tcxx", "${ENCLAVE_LIBS}", "${OBJ_DIR}/${ENCLAVE}_t.o", "-Wl,--end-group",
+	"-Wl,-Bstatic", "-Wl,-Bsymbolic", "-Wl,--no-undefined",
+	"-Wl,-pie,-eenclave_entry", "-Wl,--export-dynamic",
+	"-Wl,--defsym,__ImageBase=0",
+	"-Wl,--gc-sections",
+	"-Wl,--version-script=${ENCLAVE_VERSION_SCRIPT}"]
+ENCLAVE_VERSION_SCRIPT = "${ENCLAVE}.lds"
+FINAL_ENCLAVE = "enclave"
+KEY = "${ENCLAVE}_private.pem"
+
+[tasks.prereq]
+script = [
+	"mkdir -p ${OBJ_DIR}"
+]
+
+[tasks.edger8r]
+description = "Runs Edger8r to generate ${ENCLAVE}_u.{c,h}."
+command = "${SGX_SDK}/bin/${SGX_ARCH}/sgx_edger8r"
+args = ["--untrusted",
+        "--search-path", "${SGX_SDK}/include",
+        "--search-path", "${RUST_SGX_SDK}/edl",
+        "--untrusted-dir", "${OBJ_DIR}",
+        "${ENCLAVE_EDL}"]
+dependencies = ["prereq"]
+
+[tasks.Enclave_u]
+description = "Compiles ${ENCLAVE}_u.o."
+env = {"SRC" = "${OBJ_DIR}/${ENCLAVE}_u.c", "DEST" = "${OBJ_DIR}/${ENCLAVE}_u.o"}
+command = "${CC}"
+args = ["@@remove-empty(DEBUG_FLAG)", "@@split(APP_CFLAGS,;)", "@@split(APP_INCLUDE,;)", "-c", "-o${DEST}", "${SRC}"]
+dependencies = ["edger8r"]
+
+[tasks.libEnclave_u]
+description = "Compiles lib${ENCLAVE}_u.a."
+env = {"SRC" = "${OBJ_DIR}/${ENCLAVE}_u.o", "DEST" = "${OBJ_DIR}/lib${ENCLAVE}_u.a"}
+command = "${AR}"
+args = ["rcsD", "${DEST}", "${SRC}"]
+dependencies = ["Enclave_u"]
+
+[tasks.build]
+clear = true
+description = "Compiles components written in Rust."
+env = { "RELEASE_FLAG" = { value = "--release", condition = { profiles = ["production"] } } }
+command = "cargo"
+args = ["build", "@@remove-empty(RELEASE_FLAG)"]
+dependencies = ["libEnclave_u"]
+
+[tasks.clean]
+clear = true
+description = "Cleans build artifacts."
+script = [
+	"rm -rf ${OBJ_DIR}",
+	"cargo clean"
+]
+
+[tasks.default]
+clear = true
+dependencies = ["build"]
+
+[tasks.watch]
+watch = true
+command = "makers"
+

@@ -1,17 +1,24 @@
 // Copyright (C) 2020 Fuga Kato
 
-// Receiver Enclave
 enclave {
     from "sgx_tstd.edl" import *;
     from "sgx_stdio.edl" import *;
     from "sgx_backtrace.edl" import *;
     from "sgx_tstdc.edl" import *;
+    from "sgx_file.edl" import *;
     from "sgx_tprotected_fs.edl" import *;
+    include "sgx_tcrypto.h"
+    include "sgx_tkey_exchange.h"
 
     trusted {
+        public sgx_status_t set_qe_info([in] const sgx_target_info_t *target_info, [in] const sgx_epid_group_id_t *epid_group_id);
+        public sgx_status_t start_request([in] const sgx_ec256_public_t *ga, [in] const sgx_quote_nonce_t *nonce, [out] sgx_report_t *report);
+        public sgx_status_t store_file([in, size=ciphertext_len] const uint8_t *ciphertext, uint64_t ciphertext_len, [in] const sgx_aes_gcm_128bit_tag_t *mac, [in, string] const char *filename);
         public sgx_status_t open_file([in, string] const char *filename);
-        public sgx_status_t create_file([in, string] const char *policy_sexp,
-            [in, string] const char *input_filename, [in, string] const char *output_filename);
+        public sgx_status_t create_file([in, string] const char *policy_sexp, [in, string] const char *input_filename, [in, string] const char *output_filename);
     };
-};
 
+    untrusted {
+        sgx_status_t ocall_query_time(uint64_t nonce, [out] int64_t *time_ms, [out] uint8_t *signature);
+     };
+};

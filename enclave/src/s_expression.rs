@@ -1,8 +1,16 @@
-use std::prelude::v1::*;
-use std::vec::Vec;
-use std::str::Chars;
+//use failure::{bail, Error};
 use std::iter::Peekable;
-use failure::{bail, Error};
+use std::prelude::v1::*;
+use std::str::Chars;
+use std::vec::Vec;
+
+// たすけて
+type Error = ();
+macro_rules! bail {
+    ($($t:tt),*) => {
+        return Err(());
+    };
+}
 
 #[derive(Debug, PartialEq)]
 pub enum Token {
@@ -13,7 +21,7 @@ pub enum Token {
 }
 #[derive(Debug)]
 pub struct Lexer<'a> {
-    data: Peekable<Chars<'a>>
+    data: Peekable<Chars<'a>>,
 }
 impl<'a> Lexer<'a> {
     pub fn new(s: &str) -> Lexer {
@@ -102,4 +110,3 @@ impl S {
         Ok(S::List(list))
     }
 }
-

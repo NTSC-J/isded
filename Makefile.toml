@@ -1,0 +1,19 @@
+[tasks.enclave]
+command = "makers"
+args = ["--cwd", "enclave"]
+
+[tasks.app]
+command = "makers"
+args = ["--cwd", "app"]
+
+[tasks.default]
+clear = true
+dependencies = ["enclave", "app"]
+
+[tasks.clean]
+clear = true
+script = [
+	"makers --cwd app clean",
+	"makers --cwd enclave clean"
+]
+

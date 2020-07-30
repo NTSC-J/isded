@@ -1,13 +1,21 @@
 use crate::s_expression::S;
-use chrono::prelude::*;
-use failure::{bail, Error};
+//use chrono::prelude::*;
+//use failure::{bail, Error};
 //use std::prelude::v1::*;
 use std::result::Result;
 
-// TODO
-fn get_trusted_time() -> Result<DateTime<Utc>, Error> {
-    Ok(Utc.ymd(2020, 1, 1).and_hms(0, 0, 0))
+// たすけて
+type Error = ();
+macro_rules! bail {
+    ($($t:tt),*) => {
+        return Err(());
+    };
 }
+
+// TODO
+//fn get_trusted_time() -> Result<DateTime<Utc>, Error> {
+//    Ok(Utc.ymd(2020, 1, 1).and_hms(0, 0, 0))
+//}
 fn get_monotonic_counter() -> Result<i64, Error> {
     Ok(0)
 }
@@ -114,23 +122,25 @@ pub fn interpret(expr: &S, strict: bool, dry_run: bool) -> Result<ST, Error> {
                         Ok(ST::Bool(b)) => Ok(ST::Bool(!b)),
                     }
                 }
-                // rfc3339: String -> I64
-                "rfc3339" => {
-                    test_argc(1)?;
-                    let s = atom_content(&v[1])?;
-                    // オフセットが違ってもtimestampの起点は同一(Unix epoch)
-                    Ok(ST::I64(
-                        DateTime::<FixedOffset>::parse_from_rfc3339(&s)?.timestamp_millis(),
-                    ))
-                }
-                // current_time: I64 （参照透過でない）
-                "current_time" => {
-                    if dry_run {
-                        Ok(ST::I64(0))
-                    } else {
-                        Ok(ST::I64(get_trusted_time()?.timestamp_millis())) // 5.84億年間使える
-                    }
-                }
+                //                // timevalue: String -> I64
+                //                "timevalue" => {
+                //                    test_argc(1)?;
+                //                    let s = atom_content(&v[1])?;
+                //                    // オフセットが違ってもtimestampの起点は同一(Unix epoch)
+                //                    Ok(ST::I64(
+                //                        DateTime::<FixedOffset>::parse_from_rfc3339(&s)
+                //                            .expect("no rfc3339") // FIXME
+                //                            .timestamp_millis(),
+                //                    ))
+                //                }
+                //                // now: I64 （参照透過でない）
+                //                "now" => {
+                //                    if dry_run {
+                //                        Ok(ST::I64(0))
+                //                    } else {
+                //                        Ok(ST::I64(get_trusted_time()?.timestamp_millis())) // 5.84億年間使える
+                //                    }
+                //                }
                 // counter: I64 （参照透過でない）
                 "counter" => {
                     if dry_run {
@@ -148,7 +158,8 @@ pub fn interpret(expr: &S, strict: bool, dry_run: bool) -> Result<ST, Error> {
             n => n
                 .parse::<i64>()
                 .and_then(|x| Ok(ST::I64(x)))
-                .map_err(Into::into),
+                //.map_err(Into::into),
+                .map_err(|_| ()),
         },
     }
 }

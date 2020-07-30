@@ -11,4 +11,10 @@ Enclave_u.c
 /bin
 /app/target
 /enclave/target
+/app/src/spid.txt
+/app/src/api_key.txt
+*.so
+Enclave_private.pem
+Cargo.lock
+obj/
 
