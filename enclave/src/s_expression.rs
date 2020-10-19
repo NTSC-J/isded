@@ -1,16 +1,19 @@
-//use failure::{bail, Error};
 use std::iter::Peekable;
 use std::prelude::v1::*;
 use std::str::Chars;
 use std::vec::Vec;
+use thiserror::Error;
 
-// たすけて
-type Error = ();
-macro_rules! bail {
-    ($($t:tt),*) => {
-        return Err(());
-    };
+#[derive(Error, Debug)]
+pub enum SExpressionError {
+    #[error("Unexpected Token: {0:#?}")]
+    UnexpectedTokenError(Token),
+    #[error("Early EOF")]
+    EarlyEOFError,
+    #[error("Expected )")]
+    RParenNotFoundError,
 }
+pub type SExpressionResult<T> = Result<T, SExpressionError>;
 
 #[derive(Debug, PartialEq)]
 pub enum Token {
@@ -59,21 +62,21 @@ pub enum S {
     List(Vec<S>), // nilは空のリストになる
 }
 impl S {
-    pub fn parse_str(data: &str) -> Result<S, Error> {
+    pub fn parse_str(data: &str) -> SExpressionResult<S> {
         S::parse(&mut Lexer::new(data).peekable())
     }
-    pub fn parse(lexer: &mut Peekable<Lexer>) -> Result<S, Error> {
+    pub fn parse(lexer: &mut Peekable<Lexer>) -> SExpressionResult<S> {
         if let Some(l) = lexer.next() {
             match l {
                 Token::LParen => S::get_list(lexer),
                 Token::Atom(x) => Ok(S::Atom(x)),
-                _ => bail!("unexpected token"),
+                _ => Err(SExpressionError::UnexpectedTokenError(l)),
             }
         } else {
-            bail!("early EOF")
+            Err(SExpressionError::EarlyEOFError)
         }
     }
-    fn get_list(lexer: &mut Peekable<Lexer>) -> Result<S, Error> {
+    fn get_list(lexer: &mut Peekable<Lexer>) -> SExpressionResult<S> {
         let mut list = Vec::<S>::new();
         match lexer.peek() {
             Some(Token::RParen) => {
@@ -92,7 +95,7 @@ impl S {
                             e => return e,
                         }
                         if lexer.next() != Some(Token::RParen) {
-                            bail!("expected )");
+                            return Err(SExpressionError::RParenNotFoundError)
                         }
                     }
                     Some(_) => {
@@ -102,10 +105,10 @@ impl S {
                             e => return e,
                         }
                     }
-                    None => bail!("early EOF in list"),
+                    None => return Err(SExpressionError::EarlyEOFError),
                 }
             }
-            None => bail!("early EOF in list"),
+            None => return Err(SExpressionError::EarlyEOFError),
         }
         Ok(S::List(list))
     }

@@ -1,24 +1,47 @@
-use crate::s_expression::S;
-//use chrono::prelude::*;
-//use failure::{bail, Error};
-//use std::prelude::v1::*;
-use std::result::Result;
+use crate::s_expression::{self, S};
+use crate::jwtmc;
+use chrono::prelude::*;
+use thiserror::Error;
+use std::prelude::v1::*;
+use std::collections::HashMap;
 
-// たすけて
-type Error = ();
-macro_rules! bail {
-    ($($t:tt),*) => {
-        return Err(());
-    };
+const MC_ADDR: (&str, u16) = ("localhost", 7777);
+const TIME_ADDR: (&str, u16) = ("localhost", 7777);
+
+#[derive(Error, Debug)]
+pub enum OutputPolicyError {
+    #[error("Expected atom")]
+    ExpectedAtomError,
+    #[error("Argument number mismatch")]
+    ArgumentNumberMismatchError(String, usize, usize),
+    #[error("Function without its name")]
+    EmptyFunctionError,
+    #[error("Type mismatch")]
+    TypeError,
+    #[error("Some error in function {0}")]
+    FunctionError(String),
+    #[error("Unknown function: {0}")]
+    UnknownFunctionError(String),
+    #[error(transparent)]
+    JWTMCError(#[from] jwtmc::JWTMCError),
+    #[error(transparent)]
+    SExpressionError(#[from] s_expression::SExpressionError),
+    #[error(transparent)]
+    ParseIntError(#[from] std::num::ParseIntError),
+    #[error(transparent)]
+    ParseDateTimeError(chrono::format::ParseError), // doesn't implement std::error::Error
 }
+pub type OutputPolicyResult<T> = Result<T, OutputPolicyError>;
 
 // TODO
-//fn get_trusted_time() -> Result<DateTime<Utc>, Error> {
-//    Ok(Utc.ymd(2020, 1, 1).and_hms(0, 0, 0))
-//}
-fn get_monotonic_counter() -> Result<i64, Error> {
+fn get_trusted_time() -> OutputPolicyResult<DateTime<Utc>> {
+    Ok(jwtmc::query_time(&TIME_ADDR)?)
+}
+fn get_monotonic_counter() -> OutputPolicyResult<i64> {
     Ok(0)
 }
+
+pub type Environment<'a> = HashMap<&'a str, i64>;
 
 #[derive(Debug, PartialEq)]
 pub enum ST {
@@ -26,23 +49,20 @@ pub enum ST {
     Bool(bool),
 }
 
-fn atom_content(e: &S) -> Result<&str, Error> {
-    match e {
-        S::Atom(s) => Ok(&s),
-        _ => bail!("expected atom"),
-    }
-}
-
 // strict: 文法チェックを行う
 // dry_run: MEにアクセスしない
-pub fn interpret(expr: &S, strict: bool, dry_run: bool) -> Result<ST, Error> {
+pub fn interpret(expr: &S, strict: bool, dry_run: bool) -> OutputPolicyResult<ST> {
     let interpret_ = |e| interpret(e, strict, dry_run);
     match expr {
         S::List(v) => {
-            let f = atom_content(&v[0])?; // FIXME: panicする
+            let f = match v.get(0) {
+                Some(S::Atom(s)) => s,
+                Some(_) => return Err(OutputPolicyError::ExpectedAtomError),
+                None => return Err(OutputPolicyError::EmptyFunctionError),
+            };
             let test_argc = |argc| {
                 if v.len() - 1 != argc {
-                    bail!("{} takes exactly {} arguments", f, argc);
+                    Err(OutputPolicyError::ArgumentNumberMismatchError(f.to_owned(), argc, v.len()))
                 } else {
                     Ok(())
                 }
@@ -51,18 +71,18 @@ pub fn interpret(expr: &S, strict: bool, dry_run: bool) -> Result<ST, Error> {
                 for e in v.iter().skip(1).map(interpret_) {
                     match e {
                         Ok(ST::Bool(_)) => (),
-                        _ => bail!("expected boolean value"),
+                        _ => return Err(OutputPolicyError::TypeError),
                     }
                 }
                 Ok(())
             };
-            match f {
+            match f.as_str() {
                 // <: I64 -> I64 -> Bool
                 "<" => {
                     test_argc(2)?;
                     match (interpret_(&v[1]), interpret_(&v[2])) {
                         (Ok(ST::I64(a)), Ok(ST::I64(b))) => Ok(ST::Bool(a < b)),
-                        _ => bail!("error in function <"),
+                        _ => return Err(OutputPolicyError::FunctionError("<".to_string())),
                     }
                 }
                 // >: I64 -> I64 -> Bool
@@ -70,7 +90,7 @@ pub fn interpret(expr: &S, strict: bool, dry_run: bool) -> Result<ST, Error> {
                     test_argc(2)?;
                     match (interpret_(&v[1]), interpret_(&v[2])) {
                         (Ok(ST::I64(a)), Ok(ST::I64(b))) => Ok(ST::Bool(a > b)),
-                        _ => bail!("error in function >"),
+                        _ => return Err(OutputPolicyError::FunctionError(">".to_string())),
                     }
                 }
                 // ==: a -> a -> Bool
@@ -79,7 +99,7 @@ pub fn interpret(expr: &S, strict: bool, dry_run: bool) -> Result<ST, Error> {
                     match (interpret_(&v[1]), interpret_(&v[2])) {
                         (Ok(ST::I64(a)), Ok(ST::I64(b))) => Ok(ST::Bool(a == b)),
                         (Ok(ST::Bool(a)), Ok(ST::Bool(b))) => Ok(ST::Bool(a == b)),
-                        _ => bail!("error in function =="),
+                        _ => return Err(OutputPolicyError::FunctionError("==".to_string())),
                     }
                 }
                 // and: Bool... -> Bool
@@ -90,7 +110,7 @@ pub fn interpret(expr: &S, strict: bool, dry_run: bool) -> Result<ST, Error> {
                     for elem in v.iter().skip(1).map(interpret_) {
                         match elem {
                             Err(e) => return Err(e),
-                            Ok(ST::I64(_)) => bail!("type error in function and"),
+                            Ok(ST::I64(_)) => return Err(OutputPolicyError::FunctionError("and".to_string())),
                             Ok(ST::Bool(false)) => return Ok(ST::Bool(false)),
                             Ok(ST::Bool(true)) => (),
                         }
@@ -105,7 +125,7 @@ pub fn interpret(expr: &S, strict: bool, dry_run: bool) -> Result<ST, Error> {
                     for elem in v.iter().skip(1).map(interpret_) {
                         match elem {
                             Err(e) => return Err(e),
-                            Ok(ST::I64(_)) => bail!("type error in function or"),
+                            Ok(ST::I64(_)) => return Err(OutputPolicyError::FunctionError("or".to_string())),
                             Ok(ST::Bool(true)) => return Ok(ST::Bool(true)),
                             Ok(ST::Bool(false)) => (),
                         }
@@ -118,29 +138,29 @@ pub fn interpret(expr: &S, strict: bool, dry_run: bool) -> Result<ST, Error> {
                     test_bool()?;
                     match interpret_(&v[1]) {
                         Err(e) => Err(e),
-                        Ok(ST::I64(_)) => bail!("type error in function not"),
+                        Ok(ST::I64(_)) => return Err(OutputPolicyError::FunctionError("not".to_string())),
                         Ok(ST::Bool(b)) => Ok(ST::Bool(!b)),
                     }
                 }
-                //                // timevalue: String -> I64
-                //                "timevalue" => {
-                //                    test_argc(1)?;
-                //                    let s = atom_content(&v[1])?;
-                //                    // オフセットが違ってもtimestampの起点は同一(Unix epoch)
-                //                    Ok(ST::I64(
-                //                        DateTime::<FixedOffset>::parse_from_rfc3339(&s)
-                //                            .expect("no rfc3339") // FIXME
-                //                            .timestamp_millis(),
-                //                    ))
-                //                }
-                //                // now: I64 （参照透過でない）
-                //                "now" => {
-                //                    if dry_run {
-                //                        Ok(ST::I64(0))
-                //                    } else {
-                //                        Ok(ST::I64(get_trusted_time()?.timestamp_millis())) // 5.84億年間使える
-                //                    }
-                //                }
+                // timevalue: String -> I64
+                "timevalue" => {
+                    test_argc(1)?;
+                    let s = match v.get(1) {
+                        Some(S::Atom(s)) => s,
+                        Some(_) => return Err(OutputPolicyError::ExpectedAtomError),
+                        None => return Err(OutputPolicyError::FunctionError("timevalue".to_string())),
+                    };
+                    // オフセットが違ってもtimestampの起点は同一(Unix epoch)
+                    Ok(ST::I64(DateTime::<FixedOffset>::parse_from_rfc3339(&s).map_err(|e| OutputPolicyError::ParseDateTimeError(e))?.timestamp_millis()))
+                }
+                // now: I64 （参照透過でない）
+                "now" => {
+                    if dry_run {
+                        Ok(ST::I64(0))
+                    } else {
+                        Ok(ST::I64(get_trusted_time()?.timestamp_millis())) // 5.84億年間使える
+                    }
+                }
                 // counter: I64 （参照透過でない）
                 "counter" => {
                     if dry_run {
@@ -149,17 +169,13 @@ pub fn interpret(expr: &S, strict: bool, dry_run: bool) -> Result<ST, Error> {
                         Ok(ST::I64(get_monotonic_counter()?))
                     }
                 }
-                _ => bail!("unknown function"),
+                _ => Err(OutputPolicyError::UnknownFunctionError(f.to_owned())),
             }
         }
         S::Atom(s) => match s.as_str() {
             "true" => Ok(ST::Bool(true)),
             "false" => Ok(ST::Bool(false)),
-            n => n
-                .parse::<i64>()
-                .and_then(|x| Ok(ST::I64(x)))
-                //.map_err(Into::into),
-                .map_err(|_| ()),
+            n => Ok(ST::I64(n.parse()?)),
         },
     }
 }
@@ -168,10 +184,10 @@ pub fn output_allowed(s: &str) -> bool {
     interpret(&S::parse_str(s).expect("parse error"), false, false).unwrap() == ST::Bool(true)
 }
 
-pub fn validate(s: &str) -> Result<(), Error> {
+pub fn validate(s: &str) -> OutputPolicyResult<()> {
     match interpret(&S::parse_str(s)?, true, true) {
         Ok(ST::Bool(_)) => Ok(()),
         Err(e) => Err(e),
-        _ => bail!("result type mismatch"),
+        _ => Err(OutputPolicyError::TypeError),
     }
 }

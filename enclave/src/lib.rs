@@ -1,12 +1,19 @@
 #![cfg_attr(not(target_env = "sgx"), no_std)]
 #![cfg_attr(target_env = "sgx", feature(rustc_private))]
 
+#![feature(const_if_match)]
+#![feature(const_fn)]
+
 #[cfg(not(target_env = "sgx"))]
 #[macro_use]
 extern crate sgx_tstd as std;
 
 mod output_policy;
 mod s_expression;
+mod jwtmc;
+mod guid;
+mod wave64;
+
 use lazy_static::lazy_static;
 use libc::c_char;
 use sgx_tcrypto::rsgx_rijndael128GCM_decrypt as decrypt;
@@ -21,6 +28,8 @@ use std::slice;
 use std::sync::SgxMutex as Mutex;
 use std::untrusted::fs::File;
 use std::vec::Vec;
+
+const MC_ADDR: (&str, u16) = ("localhost", 7777);
 
 // FIXME: tprotected_fs の auto_key は MRSIGNER に紐づく
 
@@ -170,6 +179,10 @@ unsafe fn store_file_(
         ..(8 + policy_len + 8 + msg_len).try_into().unwrap()];
     // TODO: environment, MC handle and value
 
+    // TODO: error
+    let (key, ctr) = jwtmc::ctr_init(&MC_ADDR).expect("ctr_init failed");
+    println!("hii!");
+
     let w = CString::new("w").unwrap();
     let output_file = SgxFileStream::open_auto_key(CStr::from_ptr(filename), &w)
         .map_err(|_| sgx_status_t::SGX_ERROR_UNEXPECTED)?;
@@ -179,6 +192,12 @@ unsafe fn store_file_(
     output_file
         .write(&policy.as_bytes())
         .map_err(|_| sgx_status_t::SGX_ERROR_UNEXPECTED)?;
+    output_file
+        .write(&key.to_le_bytes())
+        .unwrap();
+    output_file
+        .write(&ctr.to_le_bytes())
+        .unwrap();
     output_file
         .write(&msg_len.to_be_bytes())
         .map_err(|_| sgx_status_t::SGX_ERROR_UNEXPECTED)?;
@@ -217,18 +236,40 @@ pub extern "C" fn open_file(filename: *const c_char) -> sgx_status_t {
     let mut policy: Vec<u8> = vec![0; policy_len.try_into().unwrap()];
     file.read_exact(&mut policy).expect("failed to read policy");
     let policy = std::str::from_utf8(&policy).expect("invalid utf8");
+    let mut key = [0u8; 8];
+    file.read_exact(&mut key).unwrap();
+    let key = jwtmc::Key::from_le_bytes(key);
+    let mut ctr = [0u8; 8];
+    file.read_exact(&mut ctr).unwrap();
+    let ctr = jwtmc::Ctr::from_le_bytes(ctr);
 
+    // TODO: random access
     if output_policy::output_allowed(policy) {
         let mut data_len: [u8; 8] = [0; 8];
         file.read_exact(&mut data_len)
             .expect("failed to read data length");
         let data_len = u64::from_be_bytes(data_len);
-        let mut input = MySgxFileStream::from(file).take(data_len);
-        copy(&mut input, &mut stdout()).expect("failed to output");
+        let mut data = vec![0u8; data_len as usize];
+        file.read_exact(&mut data).unwrap(); // FIXME: でかいデータだと失敗する
+        //let mut input = MySgxFileStream::from(file).take(data_len);
+        //copy(&mut input, &mut stdout()).expect("failed to output");
+        stdout().write_all(&data).unwrap();
+
+        jwtmc::ctr_access(&MC_ADDR, key, 1.0).expect("ctr_access failed");
+        
+        //file.drop(); // close
+        let w = CString::new("w").unwrap();
+        let mut file = SgxFileStream::open_auto_key(filename, &w).expect("failed to open file");
+        let mut file = MySgxFileStream::from(file);
+        file.write(&policy_len.to_be_bytes()).unwrap();
+        file.write(&policy.as_bytes()).unwrap();
+        file.write(&key.to_le_bytes()).unwrap();
+        file.write(&ctr.to_le_bytes()).unwrap();
+        file.write(&data_len.to_be_bytes()).unwrap();
+        file.write(&data).unwrap();
     } else {
         eprintln!("access forbidden");
     }
-    // TODO: MCを更新
 
     sgx_status_t::SGX_SUCCESS
 }

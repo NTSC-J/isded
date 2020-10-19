@@ -7,6 +7,7 @@ enclave {
     from "sgx_tstdc.edl" import *;
     from "sgx_file.edl" import *;
     from "sgx_tprotected_fs.edl" import *;
+    from "sgx_net.edl" import *;
     include "sgx_tcrypto.h"
     include "sgx_tkey_exchange.h"
 
@@ -18,7 +19,4 @@ enclave {
         public sgx_status_t create_file([in, string] const char *policy_sexp, [in, string] const char *input_filename, [in, string] const char *output_filename);
     };
 
-    untrusted {
-        sgx_status_t ocall_query_time(uint64_t nonce, [out] int64_t *time_ms, [out] uint8_t *signature);
-     };
 };
