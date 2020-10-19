@@ -27,6 +27,7 @@ use std::collections::HashMap;
 use reqwest::StatusCode;
 use std::ptr;
 use std::slice;
+use std::time::Instant;
 
 #[macro_use]
 extern crate log;
@@ -118,6 +119,8 @@ fn main() -> Result<(), Error> {
 ///
 /// start request: (nonce, public_key)
 fn subcommand_send(matches: &ArgMatches) -> Result<(), Error> {
+    let benchmark_start = Instant::now();
+
     let mut input: Box<dyn Read> = if let Some(name) = matches.value_of("input") {
         Box::new(File::open(name)?)
     } else {
@@ -215,6 +218,7 @@ fn subcommand_send(matches: &ArgMatches) -> Result<(), Error> {
     }
 
     info!("Sent data");
+    println!("{}", benchmark_start.elapsed().as_secs_f64());
     Ok(())
 }
 
@@ -307,6 +311,7 @@ fn subcommand_recv(matches: &ArgMatches) -> Result<(), Error> {
 }
 
 fn subcommand_open(matches: &ArgMatches) -> Result<(), Error> {
+    let benchmark_start = Instant::now();
     let enclave = init_enclave().expect("init_enclave failed!");
     macro_rules! ec {
         ($name:ident, $($arg:expr),*) => {
@@ -322,6 +327,7 @@ fn subcommand_open(matches: &ArgMatches) -> Result<(), Error> {
         let filename = CString::new(filename)?;
         ec!(open_file, filename.as_ptr());
     }
+    eprintln!("{}", benchmark_start.elapsed().as_secs_f64());
 
     enclave.destroy();
 
@@ -349,20 +355,6 @@ fn subcommand_create_local(matches: &ArgMatches) -> Result<(), Error> {
         ec!(create_file, policy.as_ptr(), input_name.as_ptr(), output_name.as_ptr());
     }
     Ok(())
-}
-
-// TODO
-/// OCall to query time to a time server
-/// 
-/// Arguments:
-/// 
-/// * `nonce`: nonce.
-/// * `time_ms`: ms from unix epoch.
-/// * `signature`: signature for (nonce (BE) || time_ms (BE)) (ECDSA NIST P-256)
-#[no_mangle]
-unsafe extern "C" fn ocall_query_time(nonce: uint64_t, time_ms: *mut int64_t, signature: *mut uint8_t) -> sgx_status_t {
-    warn!("not implemented!");
-    sgx_status_t::SGX_SUCCESS
 }
 
 #[derive(Debug, PartialEq, FromPrimitive)]
