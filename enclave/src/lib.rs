@@ -1,6 +1,5 @@
 #![cfg_attr(not(target_env = "sgx"), no_std)]
 #![cfg_attr(target_env = "sgx", feature(rustc_private))]
-
 #![feature(const_if_match)]
 #![feature(const_fn)]
 
@@ -8,10 +7,10 @@
 #[macro_use]
 extern crate sgx_tstd as std;
 
+mod guid;
+mod jwtmc;
 mod output_policy;
 mod s_expression;
-mod jwtmc;
-mod guid;
 mod wave64;
 
 use lazy_static::lazy_static;
@@ -20,6 +19,7 @@ use sgx_tcrypto::rsgx_rijndael128GCM_decrypt as decrypt;
 use sgx_tcrypto::SgxEccHandle;
 use sgx_tprotected_fs::SgxFileStream;
 use sgx_types::*;
+use std::backtrace::{self, PrintFormat};
 use std::convert::TryInto;
 use std::ffi::CStr;
 use std::ffi::CString;
@@ -152,6 +152,8 @@ unsafe fn store_file_(
     mac: &sgx_aes_gcm_128bit_tag_t,
     filename: *const c_char,
 ) -> SgxResult<()> {
+    let _ = backtrace::enable_backtrace("enclave.signed.so", PrintFormat::Full); // TODO
+
     let dhkey = DHKEY.lock().unwrap().unwrap(); // TODO
     let nonce = NONCE.lock().unwrap().unwrap(); // TODO
 
@@ -192,12 +194,8 @@ unsafe fn store_file_(
     output_file
         .write(&policy.as_bytes())
         .map_err(|_| sgx_status_t::SGX_ERROR_UNEXPECTED)?;
-    output_file
-        .write(&key.to_le_bytes())
-        .unwrap();
-    output_file
-        .write(&ctr.to_le_bytes())
-        .unwrap();
+    output_file.write(&key.to_le_bytes()).unwrap();
+    output_file.write(&ctr.to_le_bytes()).unwrap();
     output_file
         .write(&msg_len.to_be_bytes())
         .map_err(|_| sgx_status_t::SGX_ERROR_UNEXPECTED)?;
@@ -251,12 +249,12 @@ pub extern "C" fn open_file(filename: *const c_char) -> sgx_status_t {
         let data_len = u64::from_be_bytes(data_len);
         let mut data = vec![0u8; data_len as usize];
         file.read_exact(&mut data).unwrap(); // FIXME: でかいデータだと失敗する
-        //let mut input = MySgxFileStream::from(file).take(data_len);
-        //copy(&mut input, &mut stdout()).expect("failed to output");
+                                             //let mut input = MySgxFileStream::from(file).take(data_len);
+                                             //copy(&mut input, &mut stdout()).expect("failed to output");
         stdout().write_all(&data).unwrap();
 
         jwtmc::ctr_access(&MC_ADDR, key, 1.0).expect("ctr_access failed");
-        
+
         //file.drop(); // close
         let w = CString::new("w").unwrap();
         let mut file = SgxFileStream::open_auto_key(filename, &w).expect("failed to open file");
@@ -318,4 +316,11 @@ pub extern "C" fn create_file(
         .expect("failed to write actual data");
 
     sgx_status_t::SGX_SUCCESS
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ecall_test() {
+    backtrace::enable_backtrace("enclave.signed.so", PrintFormat::Full).unwrap(); // TODO
+    let time = jwtmc::query_time(&("localhost", 7777)).unwrap();
+    println!("{:#x?}", time);
 }

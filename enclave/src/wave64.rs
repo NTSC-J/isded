@@ -1,9 +1,9 @@
-use std::prelude::v1::*;
-use std::io::Read;
 use crate::guid::GUID;
 use crate::jwtmc;
 use crate::output_policy;
 use lazy_static::lazy_static;
+use std::io::Read;
+use std::prelude::v1::*;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -23,15 +23,19 @@ pub type Wave64Result<T> = Result<T, Wave64Error>;
 lazy_static! {
     static ref GUID_RIFF: GUID = GUID::from_str("66666972-912E-11CF-A5D6-28DB04C10000").unwrap();
     static ref GUID_ISDED: GUID = GUID::from_str("26C3E482-E6BF-43C1-9337-5834F5A74762").unwrap();
-    static ref GUID_SDE_DATA: GUID = GUID::from_str("49CF7F30-9668-4612-BDDA-F47412596314").unwrap();
-    static ref GUID_SDE_METADATA: GUID = GUID::from_str("E447E6E6-DBE4-4BF2-A438-A5D11CA21414").unwrap();
-    static ref GUID_SDE_FILE_NAME: GUID = GUID::from_str("E79088B7-7775-45DC-83B2-B9E4AC4D2573").unwrap();
-    static ref GUID_SDE_MIME_TYPE: GUID = GUID::from_str("6BA5B737-90A3-4A49-8717-BB59D2393EAA").unwrap();
+    static ref GUID_SDE_DATA: GUID =
+        GUID::from_str("49CF7F30-9668-4612-BDDA-F47412596314").unwrap();
+    static ref GUID_SDE_METADATA: GUID =
+        GUID::from_str("E447E6E6-DBE4-4BF2-A438-A5D11CA21414").unwrap();
+    static ref GUID_SDE_FILE_NAME: GUID =
+        GUID::from_str("E79088B7-7775-45DC-83B2-B9E4AC4D2573").unwrap();
+    static ref GUID_SDE_MIME_TYPE: GUID =
+        GUID::from_str("6BA5B737-90A3-4A49-8717-BB59D2393EAA").unwrap();
 }
 
 pub enum RIFFChunk {
     RIFF(GUID, Vec<RIFFChunk>), // form type, subchunks
-    SDEData(Vec<u8>), // file data
+    SDEData(Vec<u8>),           // file data
     SDEMetadata(String, jwtmc::Key, jwtmc::Ctr),
     //SDEEnvironment(output_policy::Environment),
     SDEFileName(String),
@@ -98,7 +102,8 @@ impl RIFFChunk {
             let ctr = jwtmc::Ctr::from_le_bytes(ctr);
 
             Ok(RIFFChunk::SDEMetadata(policy, key, ctr))
-        } else { // unknown GUID
+        } else {
+            // unknown GUID
             let mut data = vec![0u8; size];
             buf.read_exact(&mut data)?;
 

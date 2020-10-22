@@ -26,6 +26,7 @@ extern {
                        policy: *const c_char,
                        input_name: *const c_char,
                        output_name: *const c_char) -> sgx_status_t;
+    pub fn ecall_test(eid: sgx_enclave_id_t) -> sgx_status_t;
 }
 
 #[macro_export]

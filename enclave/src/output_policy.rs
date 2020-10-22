@@ -1,9 +1,9 @@
-use crate::s_expression::{self, S};
 use crate::jwtmc;
+use crate::s_expression::{self, S};
 use chrono::prelude::*;
-use thiserror::Error;
-use std::prelude::v1::*;
 use std::collections::HashMap;
+use std::prelude::v1::*;
+use thiserror::Error;
 
 const MC_ADDR: (&str, u16) = ("localhost", 7777);
 const TIME_ADDR: (&str, u16) = ("localhost", 7777);
@@ -62,7 +62,11 @@ pub fn interpret(expr: &S, strict: bool, dry_run: bool) -> OutputPolicyResult<ST
             };
             let test_argc = |argc| {
                 if v.len() - 1 != argc {
-                    Err(OutputPolicyError::ArgumentNumberMismatchError(f.to_owned(), argc, v.len()))
+                    Err(OutputPolicyError::ArgumentNumberMismatchError(
+                        f.to_owned(),
+                        argc,
+                        v.len(),
+                    ))
                 } else {
                     Ok(())
                 }
@@ -110,7 +114,9 @@ pub fn interpret(expr: &S, strict: bool, dry_run: bool) -> OutputPolicyResult<ST
                     for elem in v.iter().skip(1).map(interpret_) {
                         match elem {
                             Err(e) => return Err(e),
-                            Ok(ST::I64(_)) => return Err(OutputPolicyError::FunctionError("and".to_string())),
+                            Ok(ST::I64(_)) => {
+                                return Err(OutputPolicyError::FunctionError("and".to_string()))
+                            }
                             Ok(ST::Bool(false)) => return Ok(ST::Bool(false)),
                             Ok(ST::Bool(true)) => (),
                         }
@@ -125,7 +131,9 @@ pub fn interpret(expr: &S, strict: bool, dry_run: bool) -> OutputPolicyResult<ST
                     for elem in v.iter().skip(1).map(interpret_) {
                         match elem {
                             Err(e) => return Err(e),
-                            Ok(ST::I64(_)) => return Err(OutputPolicyError::FunctionError("or".to_string())),
+                            Ok(ST::I64(_)) => {
+                                return Err(OutputPolicyError::FunctionError("or".to_string()))
+                            }
                             Ok(ST::Bool(true)) => return Ok(ST::Bool(true)),
                             Ok(ST::Bool(false)) => (),
                         }
@@ -138,7 +146,9 @@ pub fn interpret(expr: &S, strict: bool, dry_run: bool) -> OutputPolicyResult<ST
                     test_bool()?;
                     match interpret_(&v[1]) {
                         Err(e) => Err(e),
-                        Ok(ST::I64(_)) => return Err(OutputPolicyError::FunctionError("not".to_string())),
+                        Ok(ST::I64(_)) => {
+                            return Err(OutputPolicyError::FunctionError("not".to_string()))
+                        }
                         Ok(ST::Bool(b)) => Ok(ST::Bool(!b)),
                     }
                 }
@@ -148,10 +158,16 @@ pub fn interpret(expr: &S, strict: bool, dry_run: bool) -> OutputPolicyResult<ST
                     let s = match v.get(1) {
                         Some(S::Atom(s)) => s,
                         Some(_) => return Err(OutputPolicyError::ExpectedAtomError),
-                        None => return Err(OutputPolicyError::FunctionError("timevalue".to_string())),
+                        None => {
+                            return Err(OutputPolicyError::FunctionError("timevalue".to_string()))
+                        }
                     };
                     // オフセットが違ってもtimestampの起点は同一(Unix epoch)
-                    Ok(ST::I64(DateTime::<FixedOffset>::parse_from_rfc3339(&s).map_err(|e| OutputPolicyError::ParseDateTimeError(e))?.timestamp_millis()))
+                    Ok(ST::I64(
+                        DateTime::<FixedOffset>::parse_from_rfc3339(&s)
+                            .map_err(|e| OutputPolicyError::ParseDateTimeError(e))?
+                            .timestamp_millis(),
+                    ))
                 }
                 // now: I64 （参照透過でない）
                 "now" => {

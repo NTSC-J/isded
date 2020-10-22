@@ -34,7 +34,7 @@ extern crate log;
 
 // TODO: bindgenに任せる
 mod ecall;
-use ecall::{set_qe_info, start_request, store_file, open_file, create_file};
+use ecall::{set_qe_info, start_request, store_file, open_file, create_file, ecall_test};
 
 const ENCLAVE_FILE: &'static str = "enclave.signed.so";
 const ENCLAVE_TOKEN: &'static str = "enclave.token";
@@ -87,6 +87,7 @@ fn main() -> Result<(), Error> {
                     .arg(Arg::with_name("input").help("the name of the input file").short("i").long("input").takes_value(true).required(true))
                     .arg(Arg::with_name("output").help("the name of the output file (default: <input file name>.isded)").short("o").long("output").takes_value(true).required(false))
                     .arg(Arg::with_name("policy").help("the policy").short("c").long("policy").takes_value(true).required(true)))
+        .subcommand(SubCommand::with_name("test"))
         .arg(Arg::with_name("version").help("display app version").long("version"));
 
     let matches = app.get_matches();
@@ -105,6 +106,10 @@ fn main() -> Result<(), Error> {
 
     if let Some(matches) = matches.subcommand_matches("create-local") {
         return subcommand_create_local(matches);
+    }
+
+    if let Some(matches) = matches.subcommand_matches("test") {
+        return subcommand_test(matches);
     }
 
     if let Some(_) = matches.value_of("version") {
@@ -354,6 +359,17 @@ fn subcommand_create_local(matches: &ArgMatches) -> Result<(), Error> {
         let output_name = CString::new(output_name)?;
         ec!(create_file, policy.as_ptr(), input_name.as_ptr(), output_name.as_ptr());
     }
+    Ok(())
+}
+
+fn subcommand_test(matches: &ArgMatches) -> Result<(), Error> {
+    let enclave = init_enclave().unwrap();
+    let eid = enclave.geteid();
+
+    unsafe {
+        ecall_test(eid);
+    }
+
     Ok(())
 }
 

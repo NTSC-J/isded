@@ -95,7 +95,7 @@ impl S {
                             e => return e,
                         }
                         if lexer.next() != Some(Token::RParen) {
-                            return Err(SExpressionError::RParenNotFoundError)
+                            return Err(SExpressionError::RParenNotFoundError);
                         }
                     }
                     Some(_) => {

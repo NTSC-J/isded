@@ -1,17 +1,19 @@
-use serde::{Serialize, Deserialize};
-use jsonwebtoken::{Header, Validation, Algorithm, DecodingKey, EncodingKey, TokenData};
-use thiserror::Error;
-use chrono::prelude::*;
 use bufstream::BufStream;
+use chrono::prelude::*;
+use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, TokenData, Validation};
 use lazy_static::lazy_static;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
-use std::net::{ToSocketAddrs, TcpStream}; // sgx_libc 経由でOCallする
-use std::prelude::v1::*;
 use std::io::prelude::*;
+use std::net::{TcpStream, ToSocketAddrs}; // sgx_libc 経由でOCallする
+use std::prelude::v1::*;
 
 lazy_static! {
-    static ref ENCODING_KEY: EncodingKey = EncodingKey::from_rsa_pem(include_bytes!("client_private.pem")).unwrap();
-    static ref DECODING_KEY: DecodingKey<'static> = DecodingKey::from_rsa_pem(include_bytes!("server_public.pem")).unwrap();
+    static ref ENCODING_KEY: EncodingKey = EncodingKey::from_rsa_der(include_bytes!("client_private.der"));
+    static ref DECODING_KEY: DecodingKey<'static> = DecodingKey::from_rsa_der(include_bytes!("server_public.der"));
+    //static ref ENCODING_KEY: EncodingKey = EncodingKey::from_rsa_pem(include_bytes!("client_private.der")).unwrap();
+    //static ref DECODING_KEY: DecodingKey<'static> = DecodingKey::from_rsa_pem(include_bytes!("server_public.der")).unwrap();
 }
 
 #[derive(Error, Debug)]
@@ -20,8 +22,6 @@ pub enum JWTMCError {
     ServerError(String),
     #[error("Nonce mismatch (client side)")]
     ClientNonceMismatchError,
-    #[error("Invalid signature (client side)")]
-    ClientInvalidSignatureError,
     #[error("Server returned an invalid response")]
     InvalidResponseError,
     #[error("Nonce mismatch (server side)")]
@@ -61,19 +61,22 @@ struct Res {
 #[derive(Debug, Serialize, Deserialize)]
 struct ResError {
     msgtype: String, // "error"
-    info: String, // "invalid_signature" | "invalid_request" | "nonce_mismatch"
+    info: String,    // "invalid_signature" | "invalid_request" | "nonce_mismatch"
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ReqCtrInit {
     msgtype: String,
     nonce: Nonce,
+    pubkey: String,
 }
 impl ReqCtrInit {
     fn new(nonce: Nonce) -> Self {
         ReqCtrInit {
             msgtype: "ctr_init".to_owned(),
-            nonce: nonce
+            nonce: nonce,
+            // FIXME: !!!!!
+            pubkey: r#"{"e":"AQAB","kid":"oi4yXRRUW2nbIimn_P0dLfVgnO2TMUuIze0Qx5vM9jU","kty":"RSA","n":"wuxmKcJMeIH1XqPpp9RpTKe0wjcDzYu_45SvMzU55imGr7qZaiY1lqRiGXlL4_yIT0QdIFBkG3FKn6V-7bvwN5tAOePBVy832ACHyPhDuGg97rijLchRoE4vu9L8TIXD-5lgRRpzb2X7_9D_5Nis_G-7rRRtx5Itk8rKEtHfj3z7Kqes7CkCBvXgASSUq1RYU0XOg8MzKaILFE65ULX4-DDzRcDcM0e0ky25nbGqBXFFFVyRsTSVRKXdELGAfHBmyR79_ryYub9cGwlEstDGRiCfsihQWuaAS1323Bo-ZvjMvx9OmiGsMoQURFEQ9K_wt3I3OO9vbpGTaxuKJx8L-w"}"#.to_owned(),
         }
     }
 }
@@ -83,7 +86,7 @@ struct ResCtrInitOk {
     msgtype: String, // "ctr_init_ok"
     key: Key,
     nonce: Nonce,
-    v: Ctr,
+    ctr: Ctr,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -99,7 +102,7 @@ impl ReqCtrAccess {
             msgtype: "ctr_access".to_owned(),
             nonce0: nonce0,
             key: key,
-            inc: inc
+            inc: inc,
         }
     }
 }
@@ -122,7 +125,7 @@ impl ReqCtrAccessAck1 {
         ReqCtrAccessAck1 {
             msgtype: "ctr_access_ack1".to_owned(),
             nonce0: nonce0,
-            nonce1: nonce1
+            nonce1: nonce1,
         }
     }
 }
@@ -132,7 +135,7 @@ struct ResCtrAccessOk {
     msgtype: String,
     nonce0: Nonce,
     nonce1: Nonce,
-    v: Ctr,
+    ctr: Ctr,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -144,7 +147,7 @@ impl ReqTimeQuery {
     fn new(nonce: Nonce) -> Self {
         ReqTimeQuery {
             msgtype: "time_query".to_owned(),
-            nonce: nonce
+            nonce: nonce,
         }
     }
 }
@@ -158,9 +161,7 @@ struct ResTimeAnswer {
 
 fn encode<T: Serialize>(claims: &T) -> JWTMCResult<Vec<u8>> {
     //let line: String = jsonwebtoken::encode(&Header::new(Algorithm::RS256), claims, &ENCODING_KEY)? + "\n";
-    let encoding_key = EncodingKey::from_rsa_pem(include_bytes!("client_private.pem")).unwrap();
-    let line: String = jsonwebtoken::encode(&Header::new(Algorithm::RS256), claims, &encoding_key)? + "\n";
-    println!("encode: {}", line);
+    let line: String = jsonwebtoken::encode(&Header::new(Algorithm::RS256), claims, &*ENCODING_KEY)? + "\n";
     Ok(line.into_bytes())
 }
 
@@ -170,7 +171,11 @@ fn decode<T: serde::de::DeserializeOwned>(token: &str) -> JWTMCResult<TokenData<
         algorithms: vec![Algorithm::RS256],
         ..Default::default()
     };
-    Ok(jsonwebtoken::decode::<T>(token, &DECODING_KEY, &validation)?)
+    let token = token.trim_end_matches(&['\r', '\n'][..]);
+
+    // FIXME: 署名検証
+    //jsonwebtoken::decode(token, &*DECODING_KEY, &validation).map_err(|e| e.into())
+    jsonwebtoken::dangerous_insecure_decode_with_validation(token, &validation).map_err(|e| e.into())
 }
 
 // TODO: 共通する処理はマクロにしても良いかもしれない
@@ -179,18 +184,13 @@ pub fn ctr_init<A: ToSocketAddrs>(addr: A) -> JWTMCResult<(Key, Ctr)> {
     let stream = TcpStream::connect(addr)?;
     let mut stream = BufStream::new(stream);
 
-    let nonce = rand::random();
-    println!("nonce: {}", nonce);
-    let req = ReqCtrInit::new(nonce);
-    println!("req: {:?}", &req);
-    let req = encode(&req)?;
-    //let req = encode(&ReqCtrInit::new(nonce))?;
-    println!("req: {}", String::from_utf8(req.clone()).unwrap());
-    stream.write(&req)?;
+    let nonce = rand::random::<u32>().into();
+    let req = encode(&ReqCtrInit::new(nonce))?;
+    stream.write_all(&req)?;
+    stream.flush()?;
 
     let mut res = String::new();
     stream.read_line(&mut res)?;
-    println!("res: {}", &res);
 
     let restype = decode::<Res>(&res)?.claims.msgtype;
     let res_ok = match restype.as_str() {
@@ -202,16 +202,17 @@ pub fn ctr_init<A: ToSocketAddrs>(addr: A) -> JWTMCResult<(Key, Ctr)> {
         return Err(JWTMCError::ClientNonceMismatchError);
     }
 
-    Ok((res_ok.claims.key, res_ok.claims.v))
+    Ok((res_ok.claims.key, res_ok.claims.ctr))
 }
 
 pub fn ctr_access<A: ToSocketAddrs>(addr: A, key: Key, inc: Ctr) -> JWTMCResult<Ctr> {
     let stream = TcpStream::connect(addr)?;
     let mut stream = BufStream::new(stream);
 
-    let nonce0 = rand::random();
+    let nonce0 = rand::random::<u32>().into();
     let req = encode(&ReqCtrAccess::new(nonce0, key, inc))?;
-    stream.write(&req)?;
+    stream.write_all(&req)?;
+    stream.flush()?;
 
     let mut res = String::new();
     stream.read_line(&mut res)?;
@@ -228,7 +229,8 @@ pub fn ctr_access<A: ToSocketAddrs>(addr: A, key: Key, inc: Ctr) -> JWTMCResult<
     let nonce1 = res_ack0.claims.nonce1;
 
     let req_ack1 = encode(&ReqCtrAccessAck1::new(nonce0, nonce1))?;
-    stream.write(&req_ack1)?;
+    stream.write_all(&req_ack1)?;
+    stream.flush()?;
 
     let mut res = String::new();
     stream.read_line(&mut res)?;
@@ -243,16 +245,17 @@ pub fn ctr_access<A: ToSocketAddrs>(addr: A, key: Key, inc: Ctr) -> JWTMCResult<
         return Err(JWTMCError::ClientNonceMismatchError);
     }
 
-    Ok(res_ok.claims.v)
+    Ok(res_ok.claims.ctr)
 }
 
 pub fn query_time<A: ToSocketAddrs>(addr: A) -> JWTMCResult<DateTime<Utc>> {
     let stream = TcpStream::connect(addr)?;
     let mut stream = BufStream::new(stream);
 
-    let nonce = rand::random();
+    let nonce = rand::random::<u32>().into();
     let req = encode(&ReqTimeQuery::new(nonce))?;
-    stream.write(&req)?;
+    stream.write_all(&req)?;
+    stream.flush()?;
 
     let mut res = String::new();
     stream.read_line(&mut res)?;
@@ -271,4 +274,3 @@ pub fn query_time<A: ToSocketAddrs>(addr: A) -> JWTMCResult<DateTime<Utc>> {
     let ns = ((res_answer.claims.time - s as f64) * 1e9) as u32;
     Ok(Utc.timestamp(s, ns))
 }
-

@@ -1,6 +1,6 @@
 [env]
 APP_NAME = "isded"
-BIN_DIR = "bin"
+BIN_DIR = "."
 BIN_APP = { source = "${CARGO_MAKE_PROFILE}", default_value = "app/target/debug/${APP_NAME}", mapping = {"development" = "app/target/debug/${APP_NAME}", "production" = "app/target/release/${APP_NAME}"} }
 BIN_ENCLAVE = "enclave/enclave.signed.so"
 
@@ -28,6 +28,6 @@ clear = true
 script = [
 	"makers --cwd app clean",
 	"makers --cwd enclave clean",
-	"rm -rf bin"
+	"rm -f ${BIN_DIR}/${BIN_APP} ${BIN_DIR}/${BIN_ENCLAVE}"
 ]
 

@@ -13,25 +13,18 @@ default = []
 
 [target.'cfg(not(target_env = "sgx"))'.dependencies]
 sgx_tprotected_fs = { git = "https://github.com/apache/teaclave-sgx-sdk.git", rev = "v1.1.2" }
-sgx_tstd = { git = "https://github.com/apache/teaclave-sgx-sdk.git", features = ["stdio", "net"], rev = "v1.1.2" }
+sgx_tstd = { git = "https://github.com/apache/teaclave-sgx-sdk.git", features = ["net", "backtrace"], rev = "v1.1.2" }
 sgx_types = { git = "https://github.com/apache/teaclave-sgx-sdk.git", rev = "v1.1.2" }
 sgx_tcrypto = { git = "https://github.com/apache/teaclave-sgx-sdk.git", rev = "v1.1.2" }
 
 [dependencies]
-#common = { path = "../common_enclave" }
 libc = { git = "https://github.com/mesalock-linux/libc-sgx" }
 chrono = { git = "https://github.com/mesalock-linux/chrono-sgx", default-features = false }
 quote = "=1.0.1"
-lazy_static = { version = "1.1.0", features = ["spin_no_std"] }
+lazy_static = { version = "1.1.0", default-features = false }
 jsonwebtoken = { path = "/home/fkato/sgx/crates/jsonwebtoken-sgx" }
 serde = { git = "https://github.com/mesalock-linux/serde-sgx.git", features = ["derive"] }
 bufstream = { path = "/home/fkato/sgx/crates/bufstream-sgx" }
 thiserror = { git = "https://github.com/mesalock-linux/thiserror-sgx.git" }
 rand = { git = "https://github.com/mesalock-linux/rand-sgx.git" }
 hex = { git = "https://github.com/mesalock-linux/rust-hex-sgx.git" }
-
-#[patch.'https://github.com/apache/teaclave-sgx-sdk.git']
-#sgx_tprotected_fs = { path = "../../../sgx_tprotected_fs" }
-##sgx_tstd = { path = "../../../sgx_tstd" }
-#sgx_types = { path = "../../../sgx_types" }
-#sgx_tcrypto = { path = "../../../sgx_tcrypto" }
