@@ -34,7 +34,7 @@ extern crate log;
 
 // TODO: bindgenに任せる
 mod ecall;
-use ecall::{set_qe_info, start_request, store_file, open_file, create_file, ecall_test};
+use ecall::*;
 
 const ENCLAVE_FILE: &'static str = "enclave.signed.so";
 const ENCLAVE_TOKEN: &'static str = "enclave.token";
@@ -82,11 +82,6 @@ fn main() -> Result<(), Error> {
         .subcommand(SubCommand::with_name("open")
                     .about("open a self-destructing/emerging file")
                     .arg(Arg::with_name("input").help("the name of the input file").index(1)))
-        .subcommand(SubCommand::with_name("create-local")
-                    .about("create a self-destructing/emerging file locally (for debug)")
-                    .arg(Arg::with_name("input").help("the name of the input file").short("i").long("input").takes_value(true).required(true))
-                    .arg(Arg::with_name("output").help("the name of the output file (default: <input file name>.isded)").short("o").long("output").takes_value(true).required(false))
-                    .arg(Arg::with_name("policy").help("the policy").short("c").long("policy").takes_value(true).required(true)))
         .subcommand(SubCommand::with_name("test"))
         .arg(Arg::with_name("version").help("display app version").long("version"));
 
@@ -102,10 +97,6 @@ fn main() -> Result<(), Error> {
 
     if let Some(matches) = matches.subcommand_matches("open") {
         return subcommand_open(matches);
-    }
-
-    if let Some(matches) = matches.subcommand_matches("create-local") {
-        return subcommand_create_local(matches);
     }
 
     if let Some(matches) = matches.subcommand_matches("test") {
@@ -339,30 +330,7 @@ fn subcommand_open(matches: &ArgMatches) -> Result<(), Error> {
     Ok(())
 }
 
-fn subcommand_create_local(matches: &ArgMatches) -> Result<(), Error> {
-    let enclave = init_enclave().expect("init_enclave failed!");
-    macro_rules! ec {
-        ($name:ident, $($arg:expr),*) => {
-            ecall!(enclave, $name, $($arg),*)
-            .unwrap_or_else(|x| { panic!("{} failed: {}", stringify!($name), x.as_str()); })
-        }
-    }
-
-    let policy = matches.value_of("policy").expect("specify the policy!");
-    let input_name = matches.value_of("input").expect("specify the input!");
-    let default_output = format!("{}.sded", input_name);
-    let output_name = matches.value_of("output").unwrap_or(default_output.as_str());
-
-    unsafe {
-        let policy = CString::new(policy)?;
-        let input_name = CString::new(input_name)?;
-        let output_name = CString::new(output_name)?;
-        ec!(create_file, policy.as_ptr(), input_name.as_ptr(), output_name.as_ptr());
-    }
-    Ok(())
-}
-
-fn subcommand_test(matches: &ArgMatches) -> Result<(), Error> {
+fn subcommand_test(_matches: &ArgMatches) -> Result<(), Error> {
     let enclave = init_enclave().unwrap();
     let eid = enclave.geteid();
 

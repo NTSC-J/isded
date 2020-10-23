@@ -22,10 +22,6 @@ extern {
                       filename: *const c_char) -> sgx_status_t;
     pub fn open_file(eid: sgx_enclave_id_t, retval: *mut sgx_status_t,
                      filename: *const c_char) -> sgx_status_t;
-    pub fn create_file(eid: sgx_enclave_id_t, retval: *mut sgx_status_t,
-                       policy: *const c_char,
-                       input_name: *const c_char,
-                       output_name: *const c_char) -> sgx_status_t;
     pub fn ecall_test(eid: sgx_enclave_id_t) -> sgx_status_t;
 }
 

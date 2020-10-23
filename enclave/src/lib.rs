@@ -12,6 +12,7 @@ mod jwtmc;
 mod output_policy;
 mod s_expression;
 mod wave64;
+mod file;
 mod ecall;
 
 pub use ecall::*;

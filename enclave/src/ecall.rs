@@ -1,53 +1,20 @@
-
 use lazy_static::lazy_static;
 use libc::c_char;
 use sgx_tcrypto::rsgx_rijndael128GCM_decrypt as decrypt;
 use sgx_tcrypto::SgxEccHandle;
-use sgx_tprotected_fs::SgxFileStream;
 use sgx_types::*;
 use std::backtrace::{self, PrintFormat};
 use std::convert::TryInto;
 use std::ffi::CStr;
 use std::ffi::CString;
-use std::io::{copy, stdout, Read, Write};
+use std::string::ToString;
+use std::io::{stdout, Write};
 use std::slice;
 use std::sync::SgxMutex as Mutex;
-use std::untrusted::fs::File;
-use std::vec::Vec;
-use crate::{jwtmc, output_policy};
+use thiserror::Error;
+use crate::{jwtmc, output_policy, file};
 
 const MC_ADDR: (&str, u16) = ("localhost", 7777);
-
-// FIXME: tprotected_fs の auto_key は MRSIGNER に紐づく
-
-// std::io::copy()が使えるように、Read, Writeを実装
-struct MySgxFileStream {
-    file: SgxFileStream,
-}
-impl Read for MySgxFileStream {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        self.file
-            .read(buf)
-            .map_err(|x| std::io::Error::from_raw_os_error(x))
-    }
-}
-impl Write for MySgxFileStream {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.file
-            .write(buf)
-            .map_err(|x| std::io::Error::from_raw_os_error(x))
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.file
-            .flush()
-            .map_err(|x| std::io::Error::from_raw_os_error(x))
-    }
-}
-impl From<SgxFileStream> for MySgxFileStream {
-    fn from(file: SgxFileStream) -> Self {
-        MySgxFileStream { file: file }
-    }
-}
 
 lazy_static! {
     static ref QE_INFO: Mutex<Option<(sgx_target_info_t, sgx_epid_group_id_t)>> = Mutex::new(None);
@@ -68,6 +35,35 @@ fn rconvert_err(status: sgx_status_t) -> SgxResult<()> {
     match status {
         sgx_status_t::SGX_SUCCESS => Ok(()),
         s => Err(s),
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum ISDEDError {
+    #[error("The policy doesn't allow output")]
+    PolicyError,
+    #[error("File rollback detected (MC: expected {0}, read {1})")]
+    RollbackError(jwtmc::Ctr, jwtmc::Ctr),
+    #[error(transparent)]
+    SGXError(#[from] sgx_status_t),
+    #[error(transparent)]
+    FileError(#[from] file::FileError),
+    #[error(transparent)]
+    JWTMCError(#[from] jwtmc::JWTMCError),
+}
+
+pub type ISDEDResult<T> = Result<T, ISDEDError>;
+// ここでstd::convert::Fromが使えればいいのだが
+fn result_into_u64<T>(result: ISDEDResult<T>) -> u64 {
+    use ISDEDError::*;
+    match result {
+        Ok(_) => 0,
+        Err(error) => match error {
+            PolicyError => 0x0000000100000001,
+            RollbackError(_, _) => 0x0000000100000002,
+            SGXError(e) => e as u64,
+            _ => 0xffffffffffffffff,
+        }
     }
 }
 
@@ -171,23 +167,14 @@ unsafe fn store_file_(
     // TODO: error
     let (key, ctr) = jwtmc::ctr_init(&MC_ADDR).expect("ctr_init failed");
 
-    let w = CString::new("w").unwrap();
-    let output_file = SgxFileStream::open_auto_key(CStr::from_ptr(filename), &w)
-        .map_err(|_| sgx_status_t::SGX_ERROR_UNEXPECTED)?;
-    output_file
-        .write(&policy_len.to_be_bytes())
-        .map_err(|_| sgx_status_t::SGX_ERROR_UNEXPECTED)?;
-    output_file
-        .write(&policy.as_bytes())
-        .map_err(|_| sgx_status_t::SGX_ERROR_UNEXPECTED)?;
-    output_file.write(&key.to_le_bytes()).unwrap();
-    output_file.write(&ctr.to_le_bytes()).unwrap();
-    output_file
-        .write(&msg_len.to_be_bytes())
-        .map_err(|_| sgx_status_t::SGX_ERROR_UNEXPECTED)?;
-    output_file
-        .write(&msg)
-        .map_err(|_| sgx_status_t::SGX_ERROR_UNEXPECTED)?;
+    let filedata = file::ISDEDFileData {
+        data: msg.iter().cloned().collect(),
+        output_policy: policy.to_string(),
+        mc_handle: key,
+        mc_value: ctr,
+    };
+    let filename = CStr::from_ptr(filename).to_str().unwrap();
+    filedata.write_to(&filename).unwrap();
 
     Ok(())
 }
@@ -207,101 +194,33 @@ pub unsafe extern "C" fn store_file(
 
 // ローカルのファイルを読み込み
 #[no_mangle]
-pub extern "C" fn open_file(filename: *const c_char) -> sgx_status_t {
-    let filename = unsafe { CStr::from_ptr(filename) };
-    let r = CString::new("r").unwrap();
-    let file = SgxFileStream::open_auto_key(filename, &r).expect("failed to open file");
-    let mut file = MySgxFileStream::from(file);
+pub extern "C" fn open_file(filename: *const c_char) -> u64 {
+    let filename = unsafe { CStr::from_ptr(filename).to_str().unwrap() };
 
-    let mut policy_len: [u8; 8] = [0; 8];
-    file.read_exact(&mut policy_len)
-        .expect("failed to read policy length");
-    let policy_len = u64::from_be_bytes(policy_len);
-    let mut policy: Vec<u8> = vec![0; policy_len.try_into().unwrap()];
-    file.read_exact(&mut policy).expect("failed to read policy");
-    let policy = std::str::from_utf8(&policy).expect("invalid utf8");
-    let mut key = [0u8; 8];
-    file.read_exact(&mut key).unwrap();
-    let key = jwtmc::Key::from_le_bytes(key);
-    let mut ctr = [0u8; 8];
-    file.read_exact(&mut ctr).unwrap();
-    let ctr = jwtmc::Ctr::from_le_bytes(ctr);
-
-    // TODO: random access
-    if output_policy::output_allowed(policy) {
-        let mut data_len: [u8; 8] = [0; 8];
-        file.read_exact(&mut data_len)
-            .expect("failed to read data length");
-        let data_len = u64::from_be_bytes(data_len);
-        let mut data = vec![0u8; data_len as usize];
-        file.read_exact(&mut data).unwrap(); // FIXME: でかいデータだと失敗する
-                                             //let mut input = MySgxFileStream::from(file).take(data_len);
-                                             //copy(&mut input, &mut stdout()).expect("failed to output");
-        stdout().write_all(&data).unwrap();
-
-        jwtmc::ctr_access(&MC_ADDR, key, 1.0).expect("ctr_access failed");
-
-        //file.drop(); // close
-        let w = CString::new("w").unwrap();
-        let mut file = SgxFileStream::open_auto_key(filename, &w).expect("failed to open file");
-        let mut file = MySgxFileStream::from(file);
-        file.write(&policy_len.to_be_bytes()).unwrap();
-        file.write(&policy.as_bytes()).unwrap();
-        file.write(&key.to_le_bytes()).unwrap();
-        file.write(&ctr.to_le_bytes()).unwrap();
-        file.write(&data_len.to_be_bytes()).unwrap();
-        file.write(&data).unwrap();
-    } else {
-        eprintln!("access forbidden");
-    }
-
-    sgx_status_t::SGX_SUCCESS
+    result_into_u64(open_file_(&filename))
 }
 
-// ローカルにファイルを作る
-#[no_mangle]
-pub extern "C" fn create_file(
-    policy: *const c_char,
-    input_filename: *const c_char,
-    output_filename: *const c_char,
-) -> sgx_status_t {
-    let policy = unsafe {
-        CStr::from_ptr(policy)
-            .to_str()
-            .expect("error converting from C string")
-    };
-    let input_filename = unsafe {
-        CStr::from_ptr(input_filename)
-            .to_str()
-            .expect("error converting from C string")
-    };
-    let output_filename = unsafe { CStr::from_ptr(output_filename) };
+fn open_file_(filename: &str) -> ISDEDResult<()> {
+    let filedata = file::ISDEDFileData::read_from(&filename)?;
+    let real_mc_value = jwtmc::ctr_access(&MC_ADDR, filedata.mc_handle, 0.0)?;
+    if real_mc_value != filedata.mc_value {
+        return Err(ISDEDError::RollbackError(real_mc_value, filedata.mc_value));
+    }
 
-    output_policy::validate(policy).expect("invalid policy");
+    if output_policy::evaluate(&filedata.output_policy) {
+        stdout().write_all(&filedata.data).unwrap();
 
-    let mut input_file = File::open(&input_filename).expect("failed to open input file");
-    let w = CString::new("w").unwrap();
-    let output_file =
-        SgxFileStream::open_auto_key(output_filename, &w).expect("failed to open output file");
-    output_file
-        .write(&policy.len().to_le_bytes())
-        .expect("failed to write policy length"); // usize; 8 bytes on target
-    output_file
-        .write(policy.as_bytes())
-        .expect("failed to write policy");
+        let new_ctr = jwtmc::ctr_access(&MC_ADDR, filedata.mc_handle, 1.0).expect("ctr_access failed");
 
-    let input_len = input_file
-        .metadata()
-        .expect("failed to acquire metadata")
-        .len();
-    output_file
-        .write(&input_len.to_le_bytes())
-        .expect("failed to write data length");
-    // FIXME: ファイルサイズが変わるかもしれない
-    copy(&mut input_file, &mut MySgxFileStream::from(output_file))
-        .expect("failed to write actual data");
+        file::ISDEDFileData {
+            mc_value: new_ctr,
+            ..filedata
+        }.write_to(&filename).unwrap();
+    } else {
+        return Err(ISDEDError::PolicyError);
+    }
 
-    sgx_status_t::SGX_SUCCESS
+    Ok(())
 }
 
 #[no_mangle]

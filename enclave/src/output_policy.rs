@@ -33,14 +33,6 @@ pub enum OutputPolicyError {
 }
 pub type OutputPolicyResult<T> = Result<T, OutputPolicyError>;
 
-// TODO
-fn get_trusted_time() -> OutputPolicyResult<DateTime<Utc>> {
-    Ok(jwtmc::query_time(&TIME_ADDR)?)
-}
-fn get_monotonic_counter() -> OutputPolicyResult<i64> {
-    Ok(0)
-}
-
 pub type Environment<'a> = HashMap<&'a str, i64>;
 
 #[derive(Debug, PartialEq)]
@@ -174,17 +166,17 @@ pub fn interpret(expr: &S, strict: bool, dry_run: bool) -> OutputPolicyResult<ST
                     if dry_run {
                         Ok(ST::I64(0))
                     } else {
-                        Ok(ST::I64(get_trusted_time()?.timestamp_millis())) // 5.84億年間使える
+                        Ok(ST::I64(jwtmc::query_time(&TIME_ADDR)?.timestamp_millis())) // 5.84億年間使える
                     }
                 }
-                // counter: I64 （参照透過でない）
-                "counter" => {
-                    if dry_run {
-                        Ok(ST::I64(0))
-                    } else {
-                        Ok(ST::I64(get_monotonic_counter()?))
-                    }
-                }
+//                // counter: I64 （参照透過でない）
+//                "counter" => {
+//                    if dry_run {
+//                        Ok(ST::I64(0))
+//                    } else {
+//                        Ok(ST::I64(get_monotonic_counter()?))
+//                    }
+//                }
                 _ => Err(OutputPolicyError::UnknownFunctionError(f.to_owned())),
             }
         }
@@ -196,8 +188,14 @@ pub fn interpret(expr: &S, strict: bool, dry_run: bool) -> OutputPolicyResult<ST
     }
 }
 
-pub fn output_allowed(s: &str) -> bool {
-    interpret(&S::parse_str(s).expect("parse error"), false, false).unwrap() == ST::Bool(true)
+// TODO: 環境をサポート
+pub fn evaluate(s: &str) -> bool {
+    if let Ok(e) = S::parse_str(s) {
+        if let Ok(ST::Bool(true)) = interpret(&e, false, false) {
+            return true
+        }
+    }
+    false
 }
 
 pub fn validate(s: &str) -> OutputPolicyResult<()> {
