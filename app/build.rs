@@ -23,16 +23,4 @@ fn main () {
             println!("cargo:rustc-link-lib=dylib=sgx_uae_service");
         },
     }
-
-    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
-
-    println!("cargo:rerun-if-changed=obj/Enclave_u.h");
-    bindgen::Builder::default()
-        .header("obj/Enclave_u.h")
-        .clang_arg(format!("-I{}/include", sdk_dir))
-        .clang_arg("-I../../../edl")
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks))
-        .generate()
-        .expect("Unable to generate bindings")
-        .write_to_file(out_path.join("Enclave_u.rs")).expect("Couldn't write bindings!");
 }
