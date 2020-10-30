@@ -32,6 +32,7 @@ dependencies = [
 [[package]]
 name = "bufstream"
 version = "0.1.4"
+source = "git+https://github.com/NTSC-J/bufstream-sgx.git?rev=sgx-1.1.2#6b22f0a8cd146acdf8ddb509f080e32142e3e670"
 dependencies = [
  "sgx_tstd",
 ]
@@ -143,6 +144,7 @@ dependencies = [
 [[package]]
 name = "jsonwebtoken"
 version = "7.2.0"
+source = "git+https://github.com/NTSC-J/jsonwebtoken-sgx.git?rev=sgx-1.1.2#3fd98bfaa66c08471a07f5933871ca32a5c580de"
 dependencies = [
  "base64",
  "pem",
@@ -218,6 +220,7 @@ dependencies = [
 [[package]]
 name = "pem"
 version = "0.8.2-alpha.0"
+source = "git+https://github.com/NTSC-J/pem-rs-sgx.git?rev=sgx-1.1.2#fb8aa8e7a44f99c4df81aab80fadde0bd38bda69"
 dependencies = [
  "base64",
  "once_cell",
@@ -436,6 +439,7 @@ dependencies = [
 [[package]]
 name = "simple_asn1"
 version = "0.4.1"
+source = "git+https://github.com/NTSC-J/simple_asn1-sgx.git?rev=sgx-1.1.2#d241c9a626bbbc1f3a8c8c2cad7e874449f5ce65"
 dependencies = [
  "chrono",
  "num-bigint",

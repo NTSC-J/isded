@@ -22,9 +22,9 @@ libc = { git = "https://github.com/mesalock-linux/libc-sgx" }
 chrono = { git = "https://github.com/mesalock-linux/chrono-sgx", default-features = false }
 quote = "=1.0.1"
 lazy_static = { version = "1.1.0", default-features = false }
-jsonwebtoken = { path = "/home/fkato/sgx/crates/jsonwebtoken-sgx" }
+jsonwebtoken = { rev = "sgx-1.1.2", git = "https://github.com/NTSC-J/jsonwebtoken-sgx.git" }
 serde = { git = "https://github.com/mesalock-linux/serde-sgx.git", features = ["derive"] }
-bufstream = { path = "/home/fkato/sgx/crates/bufstream-sgx" }
+bufstream = { rev = "sgx-1.1.2", git = "https://github.com/NTSC-J/bufstream-sgx.git" }
 thiserror = { git = "https://github.com/mesalock-linux/thiserror-sgx.git" }
 rand = { git = "https://github.com/mesalock-linux/rand-sgx.git" }
 hex = { git = "https://github.com/mesalock-linux/rust-hex-sgx.git" }
