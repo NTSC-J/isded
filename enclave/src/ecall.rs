@@ -14,7 +14,7 @@ use std::sync::SgxMutex as Mutex;
 use thiserror::Error;
 use crate::{jwtmc, output_policy, file};
 
-const MC_ADDR: (&str, u16) = ("localhost", 7777);
+const MC_ADDR: (&str, u16) = ("jwtmc", 7777);
 
 lazy_static! {
     static ref QE_INFO: Mutex<Option<(sgx_target_info_t, sgx_epid_group_id_t)>> = Mutex::new(None);
