@@ -18,4 +18,5 @@ Enclave_private.pem
 Cargo.lock
 obj/
 /isded
+*.isded*
 
