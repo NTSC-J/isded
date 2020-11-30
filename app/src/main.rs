@@ -160,6 +160,7 @@ fn subcommand_send(matches: &ArgMatches) -> Result<(), Error> {
     if t != MSGType::Quote {
         bail!("not QUOTE");
     }
+    info!("Received QUOTE size: {}", quote.len());
 
     info!("Verifying QUOTE...");
     if let Err(e) = verify_quote(&quote) {
