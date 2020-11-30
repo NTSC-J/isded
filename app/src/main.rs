@@ -28,6 +28,7 @@ use reqwest::StatusCode;
 use std::ptr;
 use std::slice;
 use std::time::Instant;
+use chrono::prelude::*;
 
 #[macro_use]
 extern crate log;
@@ -67,7 +68,15 @@ macro_rules! check_status {
 }
 
 fn main() -> Result<(), Error> {
-    env_logger::init();
+    env_logger::builder()
+        .format(|buf, record| {
+            writeln!(buf, "[{} {} {}] {}",
+                Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
+                record.level(),
+                std::env::current_exe().unwrap().file_name().unwrap().to_str().unwrap(),
+                record.args())
+        })
+        .init();
     let app = app_from_crate!()
         .subcommand(SubCommand::with_name("send")
                     .about("send a self-destructing/emerging file")
