@@ -1,10 +1,11 @@
-use std::prelude::v1::*;
-use std::io::prelude::*;
+use crate::{jwtmc, output_policy};
 use sgx_tprotected_fs::SgxFileStream;
-use std::ffi::CString;
-use thiserror::Error;
 use sgx_types::*;
-use crate::jwtmc;
+use std::ffi::CString;
+use std::io::prelude::*;
+use std::prelude::v1::*;
+use thiserror::Error;
+use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Error)]
 pub enum FileError {
@@ -14,6 +15,8 @@ pub enum FileError {
     IOError(#[from] std::io::Error),
     #[error(transparent)]
     FileNameError(#[from] std::ffi::NulError),
+    #[error(transparent)]
+    BincodeError(#[from] bincode::Error),
 }
 impl From<sys_error_t> for FileError {
     fn from(error: sys_error_t) -> Self {
@@ -33,7 +36,7 @@ impl MySgxFileStream {
 
         Ok(MySgxFileStream {
             // FIXME: 鍵をMRSIGNERからderiveしている
-            file: SgxFileStream::open_auto_key(&filename, &mode)?
+            file: SgxFileStream::open_auto_key(&filename, &mode)?,
         })
     }
 }
@@ -62,12 +65,13 @@ impl From<SgxFileStream> for MySgxFileStream {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ISDEDFileData {
     pub data: Vec<u8>, // TODO: ファイルへの参照にする
     pub output_policy: String,
     pub mc_handle: jwtmc::Key,
     pub mc_value: jwtmc::Ctr,
-    // pub environment: output_policy::Environment,
+    pub environment: output_policy::Environment,
 }
 impl ISDEDFileData {
     pub fn read_from(filename: &str) -> FileResult<Self> {
@@ -77,7 +81,7 @@ impl ISDEDFileData {
         datafile.read_to_end(&mut data)?;
 
         let policyname = format!("{}.isded_policy", &filename);
-        let mut policyfile = MySgxFileStream::open(&policyname,"r")?;
+        let mut policyfile = MySgxFileStream::open(&policyname, "r")?;
         let mut policy = String::new();
         policyfile.read_to_string(&mut policy)?;
 
@@ -90,11 +94,16 @@ impl ISDEDFileData {
         mcfile.read_exact(&mut mc_value)?;
         let mc_value = jwtmc::Key::from_le_bytes(mc_value);
 
+        let envname = format!("{}.isded_env", &filename);
+        let mut envfile = MySgxFileStream::open(&envname, "r")?;
+        let mut env = bincode::deserialize_from(&mut envfile)?;
+
         Ok(ISDEDFileData {
             data: data,
             output_policy: policy,
             mc_handle: mc_handle,
             mc_value: mc_value,
+            environment: env,
         })
     }
 
@@ -111,6 +120,10 @@ impl ISDEDFileData {
         let mut mcfile = MySgxFileStream::open(&mcname, "w")?;
         mcfile.write_all(&self.mc_handle.to_le_bytes())?;
         mcfile.write_all(&self.mc_value.to_le_bytes())?;
+
+        let envname = format!("{}.isded_env", &filename);
+        let mut envfile = MySgxFileStream::open(&envname, "w")?;
+        bincode::serialize_into(envfile, &self.environment)?;
 
         Ok(())
     }

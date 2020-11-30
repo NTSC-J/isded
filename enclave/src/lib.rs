@@ -7,12 +7,12 @@
 #[macro_use]
 extern crate sgx_tstd as std;
 
+mod ecall;
 mod guid;
 mod jwtmc;
 mod output_policy;
-mod s_expression;
-mod wave64;
 mod file;
-mod ecall;
+mod s_expression;
+//mod wave64;
 
 pub use ecall::*;

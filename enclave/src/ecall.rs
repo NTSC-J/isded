@@ -1,3 +1,4 @@
+use crate::{file, jwtmc, output_policy};
 use lazy_static::lazy_static;
 use libc::c_char;
 use sgx_tcrypto::rsgx_rijndael128GCM_decrypt as decrypt;
@@ -7,12 +8,11 @@ use std::backtrace::{self, PrintFormat};
 use std::convert::TryInto;
 use std::ffi::CStr;
 use std::ffi::CString;
-use std::string::ToString;
 use std::io::{stdout, Write};
 use std::slice;
+use std::string::ToString;
 use std::sync::SgxMutex as Mutex;
 use thiserror::Error;
-use crate::{jwtmc, output_policy, file};
 
 const MC_ADDR: (&str, u16) = ("jwtmc", 7777);
 
@@ -63,7 +63,7 @@ fn result_into_u64<T>(result: ISDEDResult<T>) -> u64 {
             RollbackError(_, _) => 0x0000000100000002,
             SGXError(e) => e as u64,
             _ => 0xffffffffffffffff,
-        }
+        },
     }
 }
 
@@ -167,9 +167,12 @@ unsafe fn store_file_(
     // TODO: error
     let (key, ctr) = jwtmc::ctr_init(&MC_ADDR).expect("ctr_init failed");
 
+    let env = output_policy::init_env(policy).expect("init_env");
+
     let filedata = file::ISDEDFileData {
         data: msg.iter().cloned().collect(),
         output_policy: policy.to_string(),
+        environment: env,
         mc_handle: key,
         mc_value: ctr,
     };
@@ -206,16 +209,21 @@ fn open_file_(filename: &str) -> ISDEDResult<()> {
     if real_mc_value != filedata.mc_value {
         return Err(ISDEDError::RollbackError(real_mc_value, filedata.mc_value));
     }
+    let mut env = filedata.environment.clone();
 
-    if output_policy::evaluate(&filedata.output_policy) {
+    if output_policy::evaluate(&filedata.output_policy, &mut env) {
         stdout().write_all(&filedata.data).unwrap();
 
-        let new_ctr = jwtmc::ctr_access(&MC_ADDR, filedata.mc_handle, 1.0).expect("ctr_access failed");
+        let new_ctr =
+            jwtmc::ctr_access(&MC_ADDR, filedata.mc_handle, 1.0).expect("ctr_access failed");
 
         file::ISDEDFileData {
             mc_value: new_ctr,
+            environment: env,
             ..filedata
-        }.write_to(&filename).unwrap();
+        }
+        .write_to(&filename)
+        .unwrap();
     } else {
         return Err(ISDEDError::PolicyError);
     }
