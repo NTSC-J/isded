@@ -22,9 +22,6 @@ use num_traits::FromPrimitive;
 use std::convert::TryInto;
 use std::mem;
 use std::net::{TcpStream, TcpListener, Ipv4Addr};
-use serde_derive::Deserialize;
-use std::collections::HashMap;
-use reqwest::StatusCode;
 use std::ptr;
 use std::slice;
 use std::time::Instant;
@@ -36,13 +33,11 @@ extern crate log;
 // TODO: bindgenに任せる
 mod ecall;
 use ecall::*;
+mod ias;
 
 const ENCLAVE_FILE: &'static str = "enclave.signed.so";
 const ENCLAVE_TOKEN: &'static str = "enclave.token";
 const ISDED_PORT: u16 = 5555;
-const IAS_HOST: &str = "api.trustedservices.intel.com";
-const REPORT_SUFFIX: &str = "/sgx/dev/attestation/v4/report";
-const SIGRL_SUFFIX: &str = "/sgx/dev/attestation/v4/sigrl/";
 
 macro_rules! as_bytes {
     ($e:expr, $t:ty) => {
@@ -147,7 +142,7 @@ fn subcommand_send(matches: &ArgMatches) -> Result<(), Error> {
     info!("Received QUOTE size: {}", quote.len());
 
     info!("Verifying QUOTE...");
-    if let Err(e) = verify_quote(&quote) {
+    if let Err(e) = ias::verify_quote(&quote) {
         error!("QUOTE invalid!");
         error!("{:?}", &e);
         return Err(e);
@@ -242,14 +237,14 @@ fn subcommand_recv(matches: &ArgMatches) -> Result<(), Error> {
     info!("epid_group_id: {}", unsafe { as_hex!(&epid_group_id, sgx_epid_group_id_t) });
 
     info!("Retrieving SigRL...");
-    let sigrl = get_sigrl(&epid_group_id)?;
+    let sigrl = ias::get_sigrl(&epid_group_id)?;
 
     let bind_addr = (Ipv4Addr::new(0, 0, 0, 0), port);
     info!("Listening at {:?}...", &bind_addr);
     let listener = TcpListener::bind(bind_addr)?;
     let (mut stream, addr) = listener.accept()?;
     info!("Accepted connection: {:?}", &addr);
-    
+
     info!("Reading start request...");
     let req = read_msg_that_is(&mut stream, MSGType::StartRequest)?;
     let nonce_len = mem::size_of::<sgx_quote_nonce_t>();
@@ -375,86 +370,6 @@ fn write_msg(stream: &mut TcpStream, msgtype: MSGType, msg: &[u8]) -> Result<(),
     stream.write_all(&len)?;
     stream.write_all(&msg)?;
     Ok(())
-}
-
-#[derive(Deserialize, Debug)]
-#[allow(non_snake_case)]
-struct IASResponse {
-    id: String,
-    timestamp: String,
-    version: i64,
-    isvEnclaveQuoteStatus: String,
-    isvEnclaveQuoteBody: String,
-    revocationReason: Option<i64>,
-    pseManifestStatus: Option<String>,
-    pseManifestHash: Option<String>,
-    platformInfoBlob: Option<String>,
-    nonce: Option<String>,
-    epidPseudonym: Option<String>,
-    advisoryURL: Option<String>,
-    advisoryIDs: Option<Vec<String>>,
-}
-
-/// let IAS verify QUOTE
-fn verify_quote(quote: &Vec<u8>) -> Result<(), Error> {
-    let mut req = HashMap::new();
-    req.insert("isvEnclaveQuote", base64::encode(&quote[..]));
-    let client = reqwest::blocking::Client::new();
-    let ias_uri = format!("https://{}{}", IAS_HOST, REPORT_SUFFIX);
-    let res = client.post(&ias_uri)
-            .header("Ocp-Apim-Subscription-Key", include_str!("api_key.txt"))
-            .json(&req)
-            .send()?;
-
-    if res.status() != StatusCode::OK {
-        bail!("IAS returned error: {:?}", &res);
-    }
-
-    let _sig = res.headers().get("X-IASReport-Signature").unwrap();
-    let _cert = res.headers().get("X-IASReport-Signing-Certificate").unwrap();
-
-    let resbody = res.json::<IASResponse>()?;
-    match resbody.isvEnclaveQuoteStatus.as_str() {
-        "OK" => return Ok(()),
-        "SIGNATURE_INVALID" => bail!("EPID signature of the ISV enclave QUOTE was invalid."),
-        "GROUP_REVOKED" => bail!("EPID group has been revoked (reason: {}).", &resbody.revocationReason.unwrap()),
-        "SIGNATURE_REVOKED" => bail!("The EPID private key used to sign the QUOTE has been revoked by signature."),
-        "KEY_REVOKED" => bail!("The EPID private key used to sign the QUOTE has been directry revoked."),
-        "SIGRL_VERSION_MISMATCH" => bail!("QUOTE's SigRL version is old."),
-        "GROUP_OUT_OF_DATE" | "CONFIGURATION_NEEDED" | "SW_HARDENING_NEEDED" | "CONFIGURATION_AND_SW_HARDENING_NEEDED" => {
-            warn!("{}",
-                match resbody.isvEnclaveQuoteStatus.as_str() {
-                    "GROUP_OUT_OF_DATE" => "The TCB level of SGX platform is outdated.",
-                    "CONFIGURATION_NEEDED" => "Additional configuration of SGX platform may be needed.",
-                    "SW_HARDENING_NEEDED" => "Additional SW hardening in the enclave may be needed.",
-                    "CONFIGURATION_AND_SW_HARDENING_NEEDED" => "Additional configuration of SGX platform and SW hardening in the enclave may be needed.",
-                    _ => unreachable!()
-                });
-            if let Some(url) = &resbody.advisoryURL {
-                warn!("See advisory: {}", &url);
-            }
-            if let Some(ids) = &resbody.advisoryIDs {
-                warn!("Advisory IDs: {}", &ids.join(", "));
-            }
-            return Ok(()); // NOTE: maybe should return error
-        },
-        _ => bail!("{}: unknown QUOTE status", &resbody.isvEnclaveQuoteStatus)
-    };
-}
-
-/// Get SigRL from IAS
-fn get_sigrl(epid_group_id: &sgx_epid_group_id_t) -> Result<Vec<u8>, Error> {
-    let mut epid_group_id = epid_group_id.clone();
-    epid_group_id.reverse();
-    let ias_uri = format!("https://{}{}{}", IAS_HOST, SIGRL_SUFFIX, hex::encode(&epid_group_id));
-    let client = reqwest::blocking::Client::new();
-    let res = client.get(&ias_uri)
-        .header("Ocp-Apim-Subscription-Key", include_str!("api_key.txt"))
-        .send()?;
-    if res.status() != StatusCode::OK {
-        bail!("IAS returned error: {:?}", &res);
-    }
-    Ok(base64::decode(res.text()?).expect("decode failed"))
 }
 
 fn init_enclave() -> SgxResult<SgxEnclave> {
