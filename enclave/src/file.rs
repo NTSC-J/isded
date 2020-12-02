@@ -96,7 +96,7 @@ impl ISDEDFileData {
 
         let envname = format!("{}.isded_env", &filename);
         let mut envfile = MySgxFileStream::open(&envname, "r")?;
-        let mut env = bincode::deserialize_from(&mut envfile)?;
+        let env = bincode::deserialize_from(&mut envfile)?;
 
         Ok(ISDEDFileData {
             data: data,
@@ -122,7 +122,7 @@ impl ISDEDFileData {
         mcfile.write_all(&self.mc_value.to_le_bytes())?;
 
         let envname = format!("{}.isded_env", &filename);
-        let mut envfile = MySgxFileStream::open(&envname, "w")?;
+        let envfile = MySgxFileStream::open(&envname, "w")?;
         bincode::serialize_into(envfile, &self.environment)?;
 
         Ok(())

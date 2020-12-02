@@ -7,7 +7,6 @@ use sgx_types::*;
 use std::backtrace::{self, PrintFormat};
 use std::convert::TryInto;
 use std::ffi::CStr;
-use std::ffi::CString;
 use std::io::{stdout, Write};
 use std::slice;
 use std::string::ToString;

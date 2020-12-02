@@ -6,7 +6,6 @@ use std::prelude::v1::*;
 use thiserror::Error;
 use serde::{Serialize, Deserialize};
 
-const MC_ADDR: (&str, u16) = ("jwtmc", 7777);
 const TIME_ADDR: (&str, u16) = ("jwtmc", 7777);
 
 #[derive(Error, Debug)]
