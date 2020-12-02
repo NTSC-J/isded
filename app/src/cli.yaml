@@ -1,0 +1,51 @@
+name: isded
+version: "1.0"
+about: "Interactive Self-Destructing/Emerging Data manager"
+
+args:
+    - version:
+        long: version
+        help: Displays the app version
+subcommands:
+    - send:
+        about: Sends a self-destructing/emerging file
+        args:
+            - input:
+                short: i
+                help: the name of the input file
+                index: 1
+            - policy:
+                short: c
+                help: the output policy
+            - to:
+                short: t
+                help: the host name of the receiver
+                takes_value: true
+                required: true
+            - port:
+                short: p
+                help: the port of the receiver
+                takes_value: true
+    - recv:
+        about: Receives a self-destructing/emerging file
+        args:
+            - output:
+                short: o
+                help: the name of the output file
+                takes_value: true
+                required: true
+                index: 1
+            - port:
+                short: p
+                help: the port to listen on
+                takes_value: true
+    - open:
+        about: Opes a self-destructing/emerging file
+        args:
+            - input:
+                short: i
+                help: the name of the input file
+                index: 1
+    - test:
+        about: TEST
+

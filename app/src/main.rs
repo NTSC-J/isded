@@ -73,51 +73,35 @@ fn main() -> Result<(), Error> {
             writeln!(buf, "[{} {} {}] {}",
                 Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
                 record.level(),
-                std::env::current_exe().unwrap().file_name().unwrap().to_str().unwrap(),
+                crate_name!(),
                 record.args())
         })
         .init();
-    let app = app_from_crate!()
-        .subcommand(SubCommand::with_name("send")
-                    .about("send a self-destructing/emerging file")
-                    .arg(Arg::with_name("input").help("the name of the input file (stdin if not specified)").short("i").long("input").index(1))
-                    .arg(Arg::with_name("policy").help("the policy").short("c").takes_value(true).required(true))
-                    .arg(Arg::with_name("to").help("host name of the destination").short("t").long("to").takes_value(true).required(true))
-                    .arg(Arg::with_name("port").help("port of the destination").short("p").long("port").takes_value(true)))
-        .subcommand(SubCommand::with_name("recv")
-                    .about("receive a self-destructing/emerging file")
-                    .arg(Arg::with_name("output").help("the name of the output file").short("o").long("output").takes_value(true).index(1).required(true))
-                    .arg(Arg::with_name("port").help("the port to listen on").short("p").long("port").takes_value(true)))
-        .subcommand(SubCommand::with_name("open")
-                    .about("open a self-destructing/emerging file")
-                    .arg(Arg::with_name("input").help("the name of the input file").index(1)))
-        .subcommand(SubCommand::with_name("test"))
-        .arg(Arg::with_name("version").help("display app version").long("version"));
 
-    let matches = app.get_matches();
+    let yml = load_yaml!("cli.yaml");
+    let mut app = App::from_yaml(yml)
+        .name(crate_name!())
+        .author(crate_authors!())
+        .about(crate_description!())
+        .version(crate_version!());
 
-    if let Some(matches) = matches.subcommand_matches("send") {
-        return subcommand_send(matches);
+    let matches = app.clone().get_matches();
+
+    match matches.subcommand_name() {
+        Some("send") => subcommand_send(&matches),
+        Some("recv") => subcommand_recv(&matches),
+        Some("open") => subcommand_open(&matches),
+        Some("test") => subcommand_test(&matches),
+        _ => if matches.is_present("version") {
+            app.write_long_version(&mut io::stdout())?;
+            println!();
+            Ok(())
+        } else {
+            app.write_long_help(&mut io::stderr())?;
+            writeln!(&mut io::stderr())?;
+            Ok(())
+        }
     }
-
-    if let Some(matches) = matches.subcommand_matches("recv") {
-        return subcommand_recv(matches);
-    }
-
-    if let Some(matches) = matches.subcommand_matches("open") {
-        return subcommand_open(matches);
-    }
-
-    if let Some(matches) = matches.subcommand_matches("test") {
-        return subcommand_test(matches);
-    }
-
-    if let Some(_) = matches.value_of("version") {
-        println!("{} version {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
-        return Ok(())
-    }
-
-    bail!("invalid options");
 }
 
 /// send a self-destructing/emerging file to remote host

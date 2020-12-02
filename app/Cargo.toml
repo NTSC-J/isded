@@ -1,7 +1,7 @@
 [package]
 name = "isded"
 version = "1.0.0"
-authors = ["Baidu", "Fuga Kato"]
+authors = ["Fuga Kato"]
 build = "build.rs"
 edition = '2018'
 
@@ -13,7 +13,7 @@ sgx_types = { git = "https://github.com/apache/incubator-teaclave-sgx-sdk.git" }
 sgx_urts = { git = "https://github.com/apache/incubator-teaclave-sgx-sdk.git" }
 sgx_ucrypto = { git = "https://github.com/apache/incubator-teaclave-sgx-sdk.git" }
 dirs = "1.0.2"
-clap = "2.20.3"
+clap = { version = "2.33.3", features = ["yaml"] }
 memmap = "0.6.2"
 serde_json = "1.0.44"
 failure = "0.1.6"
