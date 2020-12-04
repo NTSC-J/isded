@@ -5,12 +5,14 @@ BIN_APP = { source = "${CARGO_MAKE_PROFILE}", default_value = "app/target/debug/
 BIN_ENCLAVE = "enclave/enclave.signed.so"
 
 [tasks.enclave]
-command = "makers"
-args = ["--cwd", "enclave"]
+script = [
+	"makers --cwd enclave --profile=${CARGO_MAKE_PROFILE}"
+]
 
 [tasks.app]
-command = "makers"
-args = ["--cwd", "app"]
+script = [
+	"makers --cwd app --profile=${CARGO_MAKE_PROFILE}"
+]
 
 [tasks.copy]
 script = [
@@ -30,4 +32,3 @@ script = [
 	"makers --cwd enclave clean",
 	"rm -f ${BIN_DIR}/${BIN_APP} ${BIN_DIR}/${BIN_ENCLAVE}"
 ]
-
