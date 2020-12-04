@@ -26,6 +26,7 @@ use std::ptr;
 use std::slice;
 use std::time::Instant;
 use chrono::prelude::*;
+use once_cell::sync::Lazy;
 
 #[macro_use]
 extern crate log;
@@ -38,6 +39,7 @@ mod ias;
 const ENCLAVE_FILE: &'static str = "enclave.signed.so";
 const ENCLAVE_TOKEN: &'static str = "enclave.token";
 const ISDED_PORT: u16 = 5555;
+static APP_YAML: Lazy<yaml_rust::Yaml> = Lazy::new(|| load_yaml!("cli.yaml").clone());
 
 macro_rules! as_bytes {
     ($e:expr, $t:ty) => {
@@ -73,30 +75,45 @@ fn main() -> Result<(), Error> {
         })
         .init();
 
-    let yml = load_yaml!("cli.yaml");
-    let mut app = App::from_yaml(yml)
-        .name(crate_name!())
-        .author(crate_authors!())
-        .about(crate_description!())
-        .version(crate_version!());
+    let matches = get_clap_app().get_matches();
 
-    let matches = app.clone().get_matches();
-
-    match matches.subcommand_name() {
-        Some("send") => subcommand_send(&matches),
-        Some("recv") => subcommand_recv(&matches),
-        Some("open") => subcommand_open(&matches),
-        Some("test") => subcommand_test(&matches),
+    let subcommand_result = match matches.subcommand() {
+        ("send", Some(sub_m)) => subcommand_send(&sub_m),
+        ("recv", Some(sub_m)) => subcommand_recv(&sub_m),
+        ("open", Some(sub_m)) => subcommand_open(&sub_m),
+        ("eval", Some(sub_m)) => subcommand_eval(&sub_m),
+        ("test", Some(sub_m)) => subcommand_test(&sub_m),
         _ => if matches.is_present("version") {
-            app.write_long_version(&mut io::stdout())?;
+            get_clap_app().write_long_version(&mut io::stdout())?;
             println!();
             Ok(())
         } else {
-            app.write_long_help(&mut io::stderr())?;
-            writeln!(&mut io::stderr())?;
+            eprintln_help();
             Ok(())
         }
+    };
+
+    // TODO: 細分化
+    match subcommand_result {
+        Err(e) => {
+            eprintln_help();
+            Err(e)
+        },
+        Ok(o) => Ok(o)
     }
+}
+
+fn get_clap_app() -> App<'static, 'static> {
+    App::from_yaml(&*APP_YAML)
+        .name(crate_name!())
+        .author(crate_authors!())
+        .about(crate_description!())
+        .version(crate_version!())
+}
+
+fn eprintln_help() {
+    get_clap_app().write_long_help(&mut io::stderr()).unwrap();
+    writeln!(&mut io::stderr()).unwrap();
 }
 
 /// send a self-destructing/emerging file to remote host
@@ -325,6 +342,21 @@ fn subcommand_test(_matches: &ArgMatches) -> Result<(), Error> {
 
     unsafe {
         ecall_test(eid);
+    }
+
+    Ok(())
+}
+
+fn subcommand_eval(matches: &ArgMatches) -> Result<(), Error> {
+    let enclave = init_enclave().unwrap();
+
+    let policy = matches.value_of("policy").unwrap();
+    let times = matches.value_of("times").unwrap_or("10").parse().unwrap();
+
+    unsafe {
+        let policy = CString::new(policy)?;
+        let mut r = 0;
+        test_policy(enclave.geteid(), &mut r, policy.as_ptr(), times);
     }
 
     Ok(())

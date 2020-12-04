@@ -16,6 +16,7 @@ enclave {
         public sgx_status_t start_request([in] const sgx_ec256_public_t *ga, [in] const sgx_quote_nonce_t *nonce, [out] sgx_report_t *report);
         public sgx_status_t store_file([in, size=ciphertext_len] const uint8_t *ciphertext, uint64_t ciphertext_len, [in] const sgx_aes_gcm_128bit_tag_t *mac, [in, string] const char *filename);
         public uint64_t open_file([in, string] const char *filename);
+        public uint64_t test_policy([in, string] const char *policy, uint64_t times);
         public void ecall_test();
     };
 

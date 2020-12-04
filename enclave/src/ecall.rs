@@ -49,6 +49,8 @@ pub enum ISDEDError {
     FileError(#[from] file::FileError),
     #[error(transparent)]
     JWTMCError(#[from] jwtmc::JWTMCError),
+    #[error(transparent)]
+    OutputPolicyError(#[from] output_policy::OutputPolicyError),
 }
 
 pub type ISDEDResult<T> = Result<T, ISDEDError>;
@@ -208,23 +210,47 @@ fn open_file_(filename: &str) -> ISDEDResult<()> {
     if real_mc_value != filedata.mc_value {
         return Err(ISDEDError::RollbackError(real_mc_value, filedata.mc_value));
     }
-    let mut env = filedata.environment.clone();
+    let env = filedata.environment.clone();
 
-    if output_policy::evaluate(&filedata.output_policy, &mut env) {
+    let (output_allowed, newenv) = output_policy::evaluate(&filedata.output_policy, env)?;
+
+    let newctr =
+        jwtmc::ctr_access(&MC_ADDR, filedata.mc_handle, 1.0).expect("ctr_access failed");
+
+    let filedata = file::ISDEDFileData {
+        mc_value: newctr,
+        environment: newenv,
+        ..filedata
+    };
+    filedata.write_to(&filename).unwrap();
+
+    if output_allowed {
         stdout().write_all(&filedata.data).unwrap();
-
-        let new_ctr =
-            jwtmc::ctr_access(&MC_ADDR, filedata.mc_handle, 1.0).expect("ctr_access failed");
-
-        file::ISDEDFileData {
-            mc_value: new_ctr,
-            environment: env,
-            ..filedata
-        }
-        .write_to(&filename)
-        .unwrap();
     } else {
         return Err(ISDEDError::PolicyError);
+    }
+
+    Ok(())
+}
+
+#[no_mangle]
+pub extern "C" fn test_policy(policy: *const c_char, times: uint64_t) -> u64 {
+    let policy = unsafe { CStr::from_ptr(policy).to_str().unwrap() };
+
+    result_into_u64(test_policy_(&policy, times))
+}
+
+fn test_policy_(policy: &str, times: u64) -> ISDEDResult<()> {
+    let _ = backtrace::enable_backtrace("enclave.signed.so", PrintFormat::Short); // TODO
+    output_policy::validate(policy)?;
+    println!("validation passed!");
+
+    let mut env = output_policy::init_env(policy)?;
+    println!("initial env: {:#x?}", &env);
+    for i in 0..times {
+        let (res, newenv) = output_policy::evaluate(policy, env)?;
+        println!("[{}]: {}, env := {:#x?}", i, res, &newenv);
+        env = newenv;
     }
 
     Ok(())

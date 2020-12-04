@@ -562,6 +562,7 @@ dependencies = [
  "memmap",
  "num-derive",
  "num-traits",
+ "once_cell",
  "rand",
  "reqwest",
  "serde",
@@ -570,6 +571,7 @@ dependencies = [
  "sgx_types",
  "sgx_ucrypto",
  "sgx_urts",
+ "yaml-rust",
 ]
 
 [[package]]
@@ -784,9 +786,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.4.0"
+version = "1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b631f7e854af39a1739f401cf34a8a013dfe09eac4fa4dba91e9768bd28168d"
+checksum = "13bd41f508810a131401606d54ac32a467c97172d74ba7662562ebba5ad07fa0"
 
 [[package]]
 name = "openssl"

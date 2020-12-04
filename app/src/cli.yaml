@@ -11,18 +11,26 @@ subcommands:
         about: Sends a self-destructing/emerging file
         args:
             - input:
+                long: input
                 short: i
                 help: the name of the input file
                 index: 1
+                takes_value: true
+                required: true
             - policy:
+                long: policy
                 short: c
                 help: the output policy
+                takes_value: true
+                required: true
             - to:
+                long: to
                 short: t
                 help: the host name of the receiver
                 takes_value: true
                 required: true
             - port:
+                long: port
                 short: p
                 help: the port of the receiver
                 takes_value: true
@@ -30,22 +38,40 @@ subcommands:
         about: Receives a self-destructing/emerging file
         args:
             - output:
+                long: output
                 short: o
                 help: the name of the output file
                 takes_value: true
                 required: true
                 index: 1
             - port:
+                long: port
                 short: p
                 help: the port to listen on
                 takes_value: true
     - open:
-        about: Opes a self-destructing/emerging file
+        about: Opens a self-destructing/emerging file
         args:
             - input:
+                long: input
                 short: i
                 help: the name of the input file
                 index: 1
+    - eval:
+        about: Evaluates an output policy for testing purpose
+        args:
+            - policy:
+                long: policy
+                short: p
+                help: the policy
+                required: true
+                takes_value: true
+                index: 1
+            - times:
+                long: times
+                short: t
+                help: evaluation count
+                takes_value: true
     - test:
         about: TEST
 

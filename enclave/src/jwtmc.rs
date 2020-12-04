@@ -174,8 +174,8 @@ fn decode<T: serde::de::DeserializeOwned>(token: &str) -> JWTMCResult<TokenData<
     let token = token.trim_end_matches(&['\r', '\n'][..]);
 
     // FIXME: 署名検証
-    jsonwebtoken::decode(token, &*DECODING_KEY, &validation).map_err(|e| e.into())
-    //jsonwebtoken::dangerous_insecure_decode_with_validation(token, &validation).map_err(|e| e.into())
+    //jsonwebtoken::decode(token, &*DECODING_KEY, &validation).map_err(|e| e.into())
+    jsonwebtoken::dangerous_insecure_decode_with_validation(token, &validation).map_err(|e| e.into())
 }
 
 // TODO: 共通する処理はマクロにしても良いかもしれない
