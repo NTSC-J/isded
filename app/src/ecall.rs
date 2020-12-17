@@ -22,6 +22,8 @@ extern {
                       filename: *const c_char) -> sgx_status_t;
     pub fn open_file(eid: sgx_enclave_id_t, retval: *mut i64,
                      filename: *const c_char) -> sgx_status_t;
+    pub fn read_file(eid: sgx_enclave_id_t, retval: *mut i64,
+                     handle: i64, buf: *mut u8, count: u64) -> sgx_status_t;
     pub fn test_policy(eid: sgx_enclave_id_t, retval: *mut i64,
                        policy: *const c_char,
                        times: uint64_t) -> sgx_status_t;
@@ -41,6 +43,7 @@ macro_rules! ecall {
                 },
                 _ => eprintln!("sgx error: {}", s)
             };
+            r
         }
     }
 }

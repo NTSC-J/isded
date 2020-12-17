@@ -320,10 +320,21 @@ fn subcommand_open(matches: &ArgMatches) -> Result<(), Error> {
     // TODO: support stdin
     let filename = matches.value_of("input").expect("specify the filename!");
 
-    unsafe {
-        let filename = CString::new(filename)?;
-        ecall!(enclave, open_file(filename.as_ptr()));
-    }
+    let filename = CString::new(filename)?;
+    let handle = unsafe { ecall!(enclave, open_file(filename.as_ptr())) };
+    info!("Opened file handle: {}", handle);
+
+    let mut buf = vec![0u8; 4096];
+    while {
+        let nread = unsafe { ecall!(enclave, read_file(handle, buf.as_mut_ptr(), buf.len().try_into().unwrap())) };
+        if nread < 0 {
+            warn!("read_file() returned {}", nread);
+        }
+        std::io::stdout().write_all(&buf[..nread.try_into().unwrap()])?;
+
+        0 < nread
+    } {}
+
     eprintln!("{}", benchmark_start.elapsed().as_secs_f64());
 
     enclave.destroy();

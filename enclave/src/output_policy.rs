@@ -52,7 +52,7 @@ struct InterpretMode {
     init_env: bool,     // 環境初期化
 }
 
-fn interpret(expr: &S, mut env: Environment, mode: InterpretMode) -> OutputPolicyResult<(Value, Environment)> {
+fn interpret(expr: &S, env: Environment, mode: InterpretMode) -> OutputPolicyResult<(Value, Environment)> {
     match expr {
         S::List(v) => { // 組込み関数
             let name = match v.get(0) {

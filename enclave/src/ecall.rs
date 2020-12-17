@@ -1,5 +1,7 @@
+use std::prelude::v1::*;
 use crate::{file, jwtmc, output_policy, ecall_define, to_i64};
 use crate::error::{Error, Result};
+use crate::file::ReadSeek;
 use lazy_static::lazy_static;
 use libc::c_char;
 use sgx_tcrypto::rsgx_rijndael128GCM_decrypt as decrypt;
@@ -12,6 +14,9 @@ use std::io::{stdout, Write};
 use std::slice;
 use std::string::ToString;
 use std::sync::SgxMutex as Mutex;
+use rand::distributions::{Distribution, Uniform};
+use std::collections::BTreeMap;
+use std::io::{Read, Seek};
 
 const MC_ADDR: (&str, u16) = ("jwtmc", 7777);
 
@@ -20,6 +25,7 @@ lazy_static! {
     static ref KEY: Mutex<Option<(sgx_ec256_private_t, sgx_ec256_public_t)>> = Mutex::new(None);
     static ref DHKEY: Mutex<Option<sgx_ec256_dh_shared_t>> = Mutex::new(None);
     static ref NONCE: Mutex<Option<sgx_quote_nonce_t>> = Mutex::new(None);
+    static ref OPEN_HANDLES: Mutex<BTreeMap<i64, Box<dyn ReadSeek>>> = Mutex::new(BTreeMap::new());
 }
 
 ecall_define! {
@@ -112,7 +118,7 @@ ecall_define! {
             &plaintext[(8 + policy_len).try_into().unwrap()..(8 + policy_len + 8).try_into().unwrap()],
         );
         let msg_len = u64::from_be_bytes(msg_len);
-        let msg = &plaintext[(8 + policy_len + 8).try_into().unwrap()
+        let mut msg = &plaintext[(8 + policy_len + 8).try_into().unwrap()
             ..(8 + policy_len + 8 + msg_len).try_into().unwrap()];
         // TODO: environment, MC handle and value
 
@@ -122,14 +128,14 @@ ecall_define! {
         let env = output_policy::init_env(policy).expect("init_env");
 
         let filedata = file::ISDEDFileData {
-            data: msg.iter().cloned().collect(),
+            data: None,
             output_policy: policy.to_string(),
             environment: env,
             mc_handle: key,
             mc_value: ctr,
         };
         let filename = unsafe { CStr::from_ptr(filename) }.to_str().unwrap();
-        filedata.write_to(&filename).unwrap();
+        filedata.write_with_data_to(&filename, &mut msg).unwrap();
 
         Ok(())
     }
@@ -137,7 +143,7 @@ ecall_define! {
 
 ecall_define! {
     /// ローカルのファイルを読み込み
-    fn open_file(filename: *const c_char) -> Result<()> {
+    fn open_file(filename: *const c_char) -> Result<i64> {
         let filename = unsafe { CStr::from_ptr(filename).to_str().unwrap() };
         let filedata = file::ISDEDFileData::read_from(&filename)?;
         let real_mc_value = jwtmc::ctr_access(&MC_ADDR, filedata.mc_handle, 0.0)?;
@@ -159,19 +165,34 @@ ecall_define! {
         filedata.write_to(&filename).unwrap();
 
         if output_allowed {
-            stdout().write_all(&filedata.data).unwrap();
+            let mut rng = rand::thread_rng();
+            let handle = Uniform::from(1..i64::MAX).sample(&mut rng);
+            let mut open_handles = OPEN_HANDLES.lock().unwrap();
+            open_handles.insert(handle, filedata.data.unwrap());
+            Ok(handle)
         } else {
-            return Err(Error::PolicyError);
+            Err(Error::PolicyError)
         }
+    }
+}
 
-        Ok(())
+ecall_define! {
+    /// openしたファイルを出力
+    fn read_file(handle: i64, buf: *mut u8, count: u64) -> Result<i64> {
+        let buf = unsafe { std::slice::from_raw_parts_mut(buf, count.try_into().unwrap()) };
+        let mut open_handles = OPEN_HANDLES.lock().unwrap();
+        if let Some(data) = open_handles.get_mut(&handle) {
+            let nread = data.read(buf)?;
+            Ok(nread.try_into().unwrap())
+        } else {
+            Err(Error::InvalidHandleError)
+        }
     }
 }
 
 ecall_define! {
     fn test_policy(policy: *const c_char, times: u64) -> Result<()> {
         let policy = unsafe { CStr::from_ptr(policy).to_str().unwrap() };
-        let _ = backtrace::enable_backtrace("enclave.signed.so", PrintFormat::Short); // TODO
         output_policy::validate(policy)?;
         println!("validation passed!");
 
@@ -189,7 +210,6 @@ ecall_define! {
 
 ecall_define! {
     fn ecall_test() {
-        backtrace::enable_backtrace("enclave.signed.so", PrintFormat::Full).unwrap(); // TODO
         let time = jwtmc::query_time(&("localhost", 7777)).unwrap();
         println!("{:#x?}", time);
     }

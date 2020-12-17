@@ -7,6 +7,8 @@ use sgx_types::sgx_status_t;
 pub enum Error {
     #[error("The policy doesn't allow output")]
     PolicyError,
+    #[error("Invalid file handle given")]
+    InvalidHandleError,
     #[error("File rollback detected (MC: expected {0}, read {1})")]
     RollbackError(jwtmc::Ctr, jwtmc::Ctr),
     #[error(transparent)]
@@ -19,6 +21,8 @@ pub enum Error {
     OutputPolicyError(#[from] output_policy::OutputPolicyError),
     #[error(transparent)]
     Utf8Error(#[from] std::str::Utf8Error),
+    #[error(transparent)]
+    IOError(#[from] std::io::Error),
 }
 
 pub type Result<T> = StdResult<T, Error>;
