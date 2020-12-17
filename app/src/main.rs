@@ -236,19 +236,13 @@ fn subcommand_recv(matches: &ArgMatches) -> Result<(), Error> {
     // TODO: parallelism
     info!("Initializing RE...");
     let enclave = init_enclave().expect("Failed to initialize enclave");
-    macro_rules! ec {
-        ($name:ident, $($arg:expr),*) => {
-            ecall!(enclave, $name, $($arg),*)
-            .unwrap_or_else(|x| { panic!("{} failed: {}", stringify!($name), x.as_str()); })
-        }
-    }
 
     info!("Teaching RE about QE...");
     let mut target_info = sgx_target_info_t::default();
     let mut epid_group_id = sgx_epid_group_id_t::default();
     unsafe {
         check_status!(sgx_init_quote(&mut target_info, &mut epid_group_id));
-        ec!(set_qe_info, &target_info, &epid_group_id);
+        ecall!(enclave, set_qe_info(&target_info, &epid_group_id));
     }
     info!("mr_enclave: {}", unsafe { as_hex!(&target_info.mr_enclave, sgx_measurement_t) });
     info!("epid_group_id: {}", unsafe { as_hex!(&epid_group_id, sgx_epid_group_id_t) });
@@ -272,7 +266,7 @@ fn subcommand_recv(matches: &ArgMatches) -> Result<(), Error> {
 
     info!("Creating REPORT for QE...");
     let mut report = sgx_report_t::default();
-    unsafe { ec!(start_request, p_ga, p_nonce, &mut report); }
+    unsafe { ecall!(enclave, start_request(p_ga, p_nonce, &mut report)); }
 
     info!("Getting QUOTE...");
     let sign_type = sgx_quote_sign_type_t::SGX_UNLINKABLE_SIGNATURE;
@@ -304,7 +298,14 @@ fn subcommand_recv(matches: &ArgMatches) -> Result<(), Error> {
     assert_eq!(mac.len(), mem::size_of::<sgx_aes_gcm_128bit_tag_t>());
 
     info!("Letting RE store sealed data to file...");
-    unsafe { ec!(store_file, ciphertext.as_ptr(), ciphertext.len().try_into()?, mac.as_ptr() as *const sgx_aes_gcm_128bit_tag_t, CString::new(output_filename)?.as_ptr()); }
+    unsafe {
+        ecall!(enclave,
+            store_file(
+                ciphertext.as_ptr(),
+                ciphertext.len().try_into()?,
+                mac.as_ptr() as *const sgx_aes_gcm_128bit_tag_t,
+                CString::new(output_filename)?.as_ptr()));
+    }
 
     info!("Sending finish response...");
     write_msg(&mut stream, MSGType::Finished, &[0u8; 0])?;
@@ -315,19 +316,13 @@ fn subcommand_recv(matches: &ArgMatches) -> Result<(), Error> {
 fn subcommand_open(matches: &ArgMatches) -> Result<(), Error> {
     let benchmark_start = Instant::now();
     let enclave = init_enclave().expect("init_enclave failed!");
-    macro_rules! ec {
-        ($name:ident, $($arg:expr),*) => {
-            ecall!(enclave, $name, $($arg),*)
-            .unwrap_or_else(|x| { panic!("{} failed: {}", stringify!($name), x.as_str()); })
-        }
-    }
 
     // TODO: support stdin
     let filename = matches.value_of("input").expect("specify the filename!");
 
     unsafe {
         let filename = CString::new(filename)?;
-        ec!(open_file, filename.as_ptr());
+        ecall!(enclave, open_file(filename.as_ptr()));
     }
     eprintln!("{}", benchmark_start.elapsed().as_secs_f64());
 

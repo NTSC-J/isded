@@ -6,7 +6,9 @@
 #[macro_use]
 extern crate sgx_tstd as std;
 
+mod error;
 mod ecall;
+mod ecall_macro;
 //mod guid;
 mod jwtmc;
 mod output_policy;
