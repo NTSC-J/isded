@@ -6,8 +6,6 @@
 
 use sgx_types::*;
 
-// TODO: bindgenに任せたい
-//include!(concat!(env!("OUT_DIR"), "/Enclave_u.rs"));
 extern {
     pub fn set_qe_info(eid: sgx_enclave_id_t, retval: *mut i64,
                        target_info: *const sgx_target_info_t,
@@ -16,17 +14,24 @@ extern {
                          ga: *const sgx_ec256_public_t,
                          nonce: *const sgx_quote_nonce_t,
                          report: *mut sgx_report_t) -> sgx_status_t;
-    pub fn store_file(eid: sgx_enclave_id_t, retval: *mut i64,
-                      ciphertext: *const uint8_t, ciphertext_len: uint64_t,
-                      mac: *const sgx_aes_gcm_128bit_tag_t,
-                      filename: *const c_char) -> sgx_status_t;
-    pub fn open_file(eid: sgx_enclave_id_t, retval: *mut i64,
-                     filename: *const c_char) -> sgx_status_t;
-    pub fn read_file(eid: sgx_enclave_id_t, retval: *mut i64,
-                     handle: i64, buf: *mut u8, count: u64) -> sgx_status_t;
+    pub fn isded_open(eid: sgx_enclave_id_t, retval: *mut i64,
+                filename: *const c_char) -> sgx_status_t;
+    pub fn isded_open_new(eid: sgx_enclave_id_t, retval: *mut i64,
+                    filename: *const c_char,
+                    epolicy: *const u8,
+                    epolicy_len: usize) -> sgx_status_t;
+    pub fn isded_read(eid: sgx_enclave_id_t, retval: *mut i64,
+                handle: i64, buf: *mut u8, count: usize) -> sgx_status_t;
+    pub fn isded_write(eid: sgx_enclave_id_t, retval: *mut i64,
+                 handle: i64, echunk: *const u8, echunk_len: usize) -> sgx_status_t;
+    #[allow(dead_code)]
+    pub fn isded_seek(eid: sgx_enclave_id_t, retval: *mut i64,
+                handle: i64, offset: i64, whence: i64) -> sgx_status_t;
+    pub fn isded_close(eid: sgx_enclave_id_t, retval: *mut i64,
+                 handle: i64) -> sgx_status_t;
     pub fn test_policy(eid: sgx_enclave_id_t, retval: *mut i64,
                        policy: *const c_char,
-                       times: uint64_t) -> sgx_status_t;
+                       times: u64) -> sgx_status_t;
     pub fn ecall_test(eid: sgx_enclave_id_t) -> sgx_status_t;
 }
 

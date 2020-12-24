@@ -9,6 +9,8 @@ pub enum Error {
     PolicyError,
     #[error("Invalid file handle given")]
     InvalidHandleError,
+    #[error("Invalid parameter given")]
+    InvalidParameterError,
     #[error("File rollback detected (MC: expected {0}, read {1})")]
     RollbackError(jwtmc::Ctr, jwtmc::Ctr),
     #[error(transparent)]

@@ -1,18 +1,15 @@
 use std::prelude::v1::*;
-use crate::{file, jwtmc, output_policy, ecall_define, to_i64};
+use crate::{file, jwtmc, output_policy, ecall_define, to_i64, crypto};
 use crate::error::{Error, Result};
-use crate::file::ReadSeek;
+use crate::file::ISDEDFile;
 use lazy_static::lazy_static;
 use libc::c_char;
-use sgx_tcrypto::rsgx_rijndael128GCM_decrypt as decrypt;
 use sgx_tcrypto::SgxEccHandle;
 use sgx_types::*;
 use std::backtrace::{self, PrintFormat};
 use std::convert::TryInto;
 use std::ffi::CStr;
-use std::io::{stdout, Write};
-use std::slice;
-use std::string::ToString;
+use std::io::Write;
 use std::sync::SgxMutex as Mutex;
 use rand::distributions::{Distribution, Uniform};
 use std::collections::BTreeMap;
@@ -25,7 +22,14 @@ lazy_static! {
     static ref KEY: Mutex<Option<(sgx_ec256_private_t, sgx_ec256_public_t)>> = Mutex::new(None);
     static ref DHKEY: Mutex<Option<sgx_ec256_dh_shared_t>> = Mutex::new(None);
     static ref NONCE: Mutex<Option<sgx_quote_nonce_t>> = Mutex::new(None);
-    static ref OPEN_HANDLES: Mutex<BTreeMap<i64, Box<dyn ReadSeek>>> = Mutex::new(BTreeMap::new());
+    static ref OPEN_HANDLES: Mutex<BTreeMap<i64, ISDEDFile>> = Mutex::new(BTreeMap::new());
+}
+
+fn dh_aes_key() -> sgx_aes_gcm_128bit_key_t {
+    let dhkey = DHKEY.lock().unwrap().unwrap(); // TODO
+    let mut key = sgx_aes_gcm_128bit_key_t::default();
+    key.clone_from_slice(&dhkey.s[..16]);
+    key
 }
 
 ecall_define! {
@@ -87,88 +91,36 @@ ecall_define! {
 }
 
 ecall_define! {
-    fn store_file(
-        ciphertext: *const uint8_t,
-        ciphertext_len: uint64_t,
-        mac: *const sgx_aes_gcm_128bit_tag_t,
-        filename: *const c_char,
-    ) -> Result<()> {
-        let ciphertext = unsafe { slice::from_raw_parts(ciphertext, ciphertext_len.try_into().unwrap()) };
-        let mac = unsafe { mac.as_ref() }.unwrap();
-
-        let dhkey = DHKEY.lock().unwrap().unwrap(); // TODO
-        let nonce = NONCE.lock().unwrap().unwrap(); // TODO
-
-        let mut key = sgx_aes_gcm_128bit_key_t::default();
-        key.clone_from_slice(&dhkey.s[..16]);
-        let mut iv = [0u8; 12];
-        iv.clone_from_slice(&nonce.rand[..12]);
-        let aad = [0u8; 0];
-        let mut plaintext = vec![0u8; ciphertext.len()];
-
-        // TODO: buffered input
-        decrypt(&key, ciphertext, &iv, &aad, mac, &mut plaintext)?;
-
-        let mut policy_len = [0u8; 8];
-        policy_len.clone_from_slice(&plaintext[0..8]);
-        let policy_len = u64::from_be_bytes(policy_len);
-        let policy = std::str::from_utf8(&plaintext[8..(8 + policy_len).try_into().unwrap()])?;
-        let mut msg_len = [0u8; 8];
-        msg_len.clone_from_slice(
-            &plaintext[(8 + policy_len).try_into().unwrap()..(8 + policy_len + 8).try_into().unwrap()],
-        );
-        let msg_len = u64::from_be_bytes(msg_len);
-        let mut msg = &plaintext[(8 + policy_len + 8).try_into().unwrap()
-            ..(8 + policy_len + 8 + msg_len).try_into().unwrap()];
-        // TODO: environment, MC handle and value
-
-        // TODO: error
-        let (key, ctr) = jwtmc::ctr_init(&MC_ADDR).expect("ctr_init failed");
-
-        let env = output_policy::init_env(policy).expect("init_env");
-
-        let filedata = file::ISDEDFileData {
-            data: None,
-            output_policy: policy.to_string(),
-            environment: env,
-            mc_handle: key,
-            mc_value: ctr,
-        };
-        let filename = unsafe { CStr::from_ptr(filename) }.to_str().unwrap();
-        filedata.write_with_data_to(&filename, &mut msg).unwrap();
-
-        Ok(())
-    }
-}
-
-ecall_define! {
     /// ローカルのファイルを読み込み
-    fn open_file(filename: *const c_char) -> Result<i64> {
+    fn isded_open(filename: *const c_char) -> Result<i64> {
         let filename = unsafe { CStr::from_ptr(filename).to_str().unwrap() };
-        let filedata = file::ISDEDFileData::read_from(&filename)?;
-        let real_mc_value = jwtmc::ctr_access(&MC_ADDR, filedata.mc_handle, 0.0)?;
-        if real_mc_value != filedata.mc_value {
-            return Err(Error::RollbackError(real_mc_value, filedata.mc_value));
+        let file = file::ISDEDFile::open_read(&filename)?;
+        let real_mc_value = jwtmc::ctr_access(&MC_ADDR, file.mc_handle, 0.0)?;
+        if real_mc_value != file.mc_value {
+            return Err(Error::RollbackError(real_mc_value, file.mc_value));
         }
-        let env = filedata.environment.clone();
+        let env = file.environment.clone();
 
-        let (output_allowed, newenv) = output_policy::evaluate(&filedata.output_policy, env)?;
+        let (output_allowed, newenv) = output_policy::evaluate(&file.output_policy, env)?;
 
         let newctr =
-            jwtmc::ctr_access(&MC_ADDR, filedata.mc_handle, 1.0).expect("ctr_access failed");
+            jwtmc::ctr_access(&MC_ADDR, file.mc_handle, 1.0).expect("ctr_access failed");
 
-        let filedata = file::ISDEDFileData {
+        let file = file::ISDEDFile {
             mc_value: newctr,
             environment: newenv,
-            ..filedata
+            ..file
         };
-        filedata.write_to(&filename).unwrap();
+        file.write_metadata(&filename).unwrap();
 
         if output_allowed {
             let mut rng = rand::thread_rng();
-            let handle = Uniform::from(1..i64::MAX).sample(&mut rng);
             let mut open_handles = OPEN_HANDLES.lock().unwrap();
-            open_handles.insert(handle, filedata.data.unwrap());
+            let mut handle = Uniform::from(1..i64::MAX).sample(&mut rng);
+            while open_handles.get(&handle).is_some() {
+                handle = Uniform::from(1..i64::MAX).sample(&mut rng);
+            }
+            open_handles.insert(handle, file);
             Ok(handle)
         } else {
             Err(Error::PolicyError)
@@ -177,18 +129,99 @@ ecall_define! {
 }
 
 ecall_define! {
-    /// openしたファイルを出力
-    fn read_file(handle: i64, buf: *mut u8, count: u64) -> Result<i64> {
-        let buf = unsafe { std::slice::from_raw_parts_mut(buf, count.try_into().unwrap()) };
+    fn isded_open_new(filename: *const c_char, epolicy: *const u8, epolicy_len: usize) -> Result<i64> {
+        let filename = unsafe { CStr::from_ptr(filename) }.to_str().unwrap();
+        let epolicy = unsafe { std::slice::from_raw_parts(epolicy, epolicy_len) };
+
+        let policy = crypto::decrypt(&dh_aes_key(), &epolicy);
+        let policy = String::from_utf8_lossy(&policy);
+
+        // TODO: error
+        let (key, ctr) = jwtmc::ctr_init(&MC_ADDR).expect("ctr_init failed");
+
+        let env = output_policy::init_env(&policy).expect("init_env");
+
+        let file = file::ISDEDFile::open_create(filename, &policy, key, ctr, env)?;
+
+        let mut rng = rand::thread_rng();
         let mut open_handles = OPEN_HANDLES.lock().unwrap();
-        if let Some(data) = open_handles.get_mut(&handle) {
-            let nread = data.read(buf)?;
+        let mut handle = Uniform::from(1..i64::MAX).sample(&mut rng);
+        while open_handles.get(&handle).is_some() {
+            handle = Uniform::from(1..i64::MAX).sample(&mut rng);
+        }
+        open_handles.insert(handle, file);
+
+        Ok(handle)
+    }
+}
+
+ecall_define! {
+    /// openしたファイルを出力
+    fn isded_read(handle: i64, buf: *mut u8, count: usize) -> Result<i64> {
+        let buf = unsafe { std::slice::from_raw_parts_mut(buf, count) };
+        let mut open_handles = OPEN_HANDLES.lock().unwrap();
+        if let Some(file) = open_handles.get_mut(&handle) {
+            let nread = file.reader.as_mut().unwrap().read(buf)?;
             Ok(nread.try_into().unwrap())
         } else {
             Err(Error::InvalidHandleError)
         }
     }
 }
+
+ecall_define! {
+    /// データを DH 鍵で復号してから seal し、open_new したファイルに追記
+    fn isded_write(handle: i64, echunk: *const u8, echunk_len: usize) -> Result<()> {
+        let echunk = unsafe { std::slice::from_raw_parts(echunk, echunk_len) };
+        let mut open_handles = OPEN_HANDLES.lock().unwrap();
+        if let Some(file) = open_handles.get_mut(&handle) {
+            let dhkey = DHKEY.lock().unwrap().unwrap();
+            let mut key = sgx_aes_gcm_128bit_key_t::default();
+            key.clone_from_slice(&dhkey.s[..16]);
+            let chunk = crypto::decrypt(&key, &echunk);
+            file.writer.as_mut().unwrap().write_all(&chunk)?;
+            Ok(())
+        } else {
+            Err(Error::InvalidHandleError)
+        }
+    }
+}
+
+ecall_define! {
+    fn isded_seek(handle: i64, offset: i64, whence: i64) -> Result<i64> {
+        use std::io::SeekFrom::*;
+        let mut open_handles = OPEN_HANDLES.lock().unwrap();
+        if let Some(file) = open_handles.get_mut(&handle) {
+            let pos = match whence {
+                0 => Start(offset.try_into().unwrap()),
+                1 => End(offset.try_into().unwrap()),
+                2 => Current(offset.try_into().unwrap()),
+                _ => return Err(Error::InvalidParameterError),
+            };
+            // FIXME
+            let newpos = file.reader.as_mut().unwrap().seek(pos)?;
+            Ok(newpos.try_into().unwrap())
+        } else {
+            Err(Error::InvalidHandleError)
+        }
+    }
+}
+
+ecall_define! {
+    fn isded_close(
+        handle: int64_t,
+    ) -> Result<()> {
+        let mut open_handles = OPEN_HANDLES.lock().unwrap();
+        if let Some(file) = open_handles.remove(&handle) {
+            if let Some(mut writer) = file.writer {
+                writer.flush()?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
 
 ecall_define! {
     fn test_policy(policy: *const c_char, times: u64) -> Result<()> {

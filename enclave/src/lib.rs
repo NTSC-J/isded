@@ -15,5 +15,6 @@ mod output_policy;
 mod file;
 mod s_expression;
 //mod wave64;
+mod crypto;
 
 pub use ecall::*;
