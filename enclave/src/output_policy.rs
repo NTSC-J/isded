@@ -32,7 +32,7 @@ pub enum OutputPolicyError {
     SExpressionError(#[from] s_expression::SExpressionError),
     #[error(transparent)]
     ParseIntError(#[from] std::num::ParseIntError),
-    #[error(transparent)]
+    #[error("Failed to parse datetime")]
     ParseDateTimeError(chrono::format::ParseError), // doesn't implement std::error::Error
 }
 pub type OutputPolicyResult<T> = Result<T, OutputPolicyError>;

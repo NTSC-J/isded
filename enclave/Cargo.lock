@@ -80,6 +80,15 @@ checksum = "4785bdd1c96b2a846b2bd7cc02e86b6b3dbf14e7e53446c4f54c92a361040822"
 [[package]]
 name = "chrono"
 version = "0.4.11"
+source = "git+https://github.com/mesalock-linux/chrono-sgx?rev=sgx_1.1.3#f964ae7f5f65bd2c9cd6f44a067e7980afc08ca0"
+dependencies = [
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
+name = "chrono"
+version = "0.4.11"
 source = "git+https://github.com/mesalock-linux/chrono-sgx#f964ae7f5f65bd2c9cd6f44a067e7980afc08ca0"
 dependencies = [
  "num-integer",
@@ -126,7 +135,7 @@ version = "1.0.0"
 dependencies = [
  "bincode",
  "bufstream",
- "chrono",
+ "chrono 0.4.11 (git+https://github.com/mesalock-linux/chrono-sgx?rev=sgx_1.1.3)",
  "hex",
  "jsonwebtoken",
  "lazy_static",
@@ -174,8 +183,8 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.66"
-source = "git+https://github.com/mesalock-linux/libc-sgx#b718c0bdf0cf197645595867e06915811fcda207"
+version = "0.2.59"
+source = "git+https://github.com/mesalock-linux/libc-sgx?rev=0.2.59#1375b1143ca9b4cf7e458c982b8e6efdd22a77e9"
 
 [[package]]
 name = "memchr"
@@ -449,7 +458,7 @@ name = "simple_asn1"
 version = "0.4.1"
 source = "git+https://github.com/NTSC-J/simple_asn1-sgx.git?rev=sgx_1.1.3#600e12478d3782ebab2716e6bae2b82417087a54"
 dependencies = [
- "chrono",
+ "chrono 0.4.11 (git+https://github.com/mesalock-linux/chrono-sgx)",
  "num-bigint",
  "num-traits",
  "sgx_tstd",
