@@ -34,6 +34,11 @@ subcommands:
                 short: p
                 help: the port of the receiver
                 takes_value: true
+            - bufsize:
+                long: bufsize
+                short: b
+                help: buffer size for data to be sent
+                takes_value: true
     - recv:
         about: Receives a self-destructing/emerging file
         args:

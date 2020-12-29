@@ -37,9 +37,10 @@ ecall_define! {
     fn set_qe_info(
         target_info: *const sgx_target_info_t,
         epid_group_id: *const sgx_epid_group_id_t,
-    ) {
+    ) -> Result<()> {
         let mut qe_info = QE_INFO.lock().unwrap(); // TODO
         qe_info.replace((unsafe { *target_info }, unsafe { *epid_group_id }));
+        Ok(())
     }
 }
 

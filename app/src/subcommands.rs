@@ -65,6 +65,7 @@ pub fn subcommand_send(matches: &ArgMatches) -> Result<(), Error> {
     let policy = matches.value_of("policy").expect("specify the policy!");
     let host = matches.value_of("to").expect("specify the host!");
     let port = value_t!(matches.value_of("port"), u16).unwrap_or(ISDED_PORT);
+    let bufsize = value_t!(matches.value_of("bufsize"), usize).unwrap_or(1048576);
 
     info!("Creating RA start request...");
     let ecc = SgxEccHandle::new();
@@ -119,15 +120,18 @@ pub fn subcommand_send(matches: &ArgMatches) -> Result<(), Error> {
     aes_key.clone_from_slice(&dhkey.s[..16]);
 
     info!("Sending policy...");
+    info!("Policy: {}", &policy);
     stream.write_msg(MsgType::EncryptedPolicy, &encrypt(&aes_key, policy.as_bytes()))?;
 
     info!("Sending chunked data...");
-    while {
-        let mut buf = vec![0u8; 1048576];
+    loop {
+        let mut buf = vec![0u8; bufsize];
         let nread = input.read(&mut buf)?;
+        if nread == 0 {
+            break;
+        }
         stream.write_msg(MsgType::EncryptedDataChunk, &encrypt(&aes_key, &buf[..nread]))?;
-        nread != 0
-    } {}
+    }
 
     info!("Sending finish request...");
     stream.write_msg(MsgType::Finished, &[0u8; 0])?;
@@ -137,8 +141,8 @@ pub fn subcommand_send(matches: &ArgMatches) -> Result<(), Error> {
     if t != MsgType::Finished {
         bail!("Error! receiver couldn't finish");
     }
+    info!("Got receiver finish response");
 
-    info!("Sent data");
     println!("{}", benchmark_start.elapsed().as_secs_f64());
     Ok(())
 }
