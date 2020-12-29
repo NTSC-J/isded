@@ -282,10 +282,9 @@ pub fn subcommand_open(matches: &ArgMatches) -> Result<(), Error> {
 
 pub fn subcommand_test(_matches: &ArgMatches) -> Result<(), Error> {
     let enclave = init_enclave().unwrap();
-    let eid = enclave.geteid();
 
     unsafe {
-        ecall_test(eid);
+        ecall!(enclave, ecall_test());
     }
 
     Ok(())

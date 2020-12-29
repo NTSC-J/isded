@@ -21,7 +21,7 @@ enclave {
         public int64_t isded_seek(int64_t handle, int64_t offset, int64_t whence);
         public int64_t isded_close(int64_t handle);
         public int64_t test_policy([in, string] const char *policy, uint64_t times);
-        public void ecall_test();
+        public int64_t ecall_test();
     };
 
 };
