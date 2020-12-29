@@ -53,13 +53,22 @@ command = "${CC}"
 args = ["@@remove-empty(DEBUG_FLAG)", "@@split(ENCLAVE_CFLAGS,;)", "@@split(ENCLAVE_INCLUDE,;)", "-c", "-o${DEST}", "${SRC}"]
 dependencies = ["edger8r"]
 
+[tasks.impl]
+description = "Creates intermediate file."
+script = [
+	"echo { > obj/ecall_impl_.rs",
+	"cat src/ecall_impl.rs >> obj/ecall_impl_.rs",
+	"echo } >> obj/ecall_impl_.rs"
+]
+dependencies = ["prereq"]
+
 [tasks.build]
 clear = true
 description = "Compiles main component written in Rust."
 env = { "RELEASE_FLAG" = { value = "--release", condition = { profiles = ["production"] } } }
 command = "cargo"
 args = ["build", "@@remove-empty(RELEASE_FLAG)"]
-dependencies = ["edger8r"]
+dependencies = ["edger8r", "impl"]
 
 [tasks.link]
 description = "Links all objects into ${FINAL_ENCLAVE}.so"
