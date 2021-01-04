@@ -1,8 +1,8 @@
 ecall_define! {
     /// Set QE's measurement (target_info) and EPID group ID
     fn set_qe_info(
-        target_info: *const sgx_target_info_t,
-        epid_group_id: *const sgx_epid_group_id_t,
+        #[edl("in")] target_info: *const sgx_target_info_t,
+        #[edl("in")] epid_group_id: *const sgx_epid_group_id_t
     ) -> Result<()> {
         let mut qe_info = QE_INFO.lock().unwrap(); // TODO
         qe_info.replace((unsafe { *target_info }, unsafe { *epid_group_id }));
@@ -14,9 +14,9 @@ ecall_define! {
     /// process start request from SP and create REPORT for QE
     /// DH key is calculated within this function
     fn start_request(
-        ga: *const sgx_ec256_public_t,
-        nonce: *const sgx_quote_nonce_t,
-        report: *mut sgx_report_t,
+        #[edl("in")] ga: *const sgx_ec256_public_t,
+        #[edl("in")] nonce: *const sgx_quote_nonce_t,
+        #[edl("out")] report: *mut sgx_report_t
     ) -> Result<()> {
         let ga = unsafe { &*ga };
         let nonce = unsafe { &*nonce };
@@ -59,7 +59,9 @@ ecall_define! {
 
 ecall_define! {
     /// ローカルのファイルを読み込み
-    fn isded_open(filename: *const c_char) -> Result<i64> {
+    fn isded_open(
+        #[edl("in, string")] filename: *const c_char
+    ) -> Result<i64> {
         let filename = unsafe { CStr::from_ptr(filename).to_str().unwrap() };
         let file = file::ISDEDFile::open_read(&filename)?;
         let real_mc_value = jwtmc::ctr_access(&MC_ADDR, file.mc_handle, 0.0)?;
@@ -96,7 +98,10 @@ ecall_define! {
 }
 
 ecall_define! {
-    fn isded_open_new(filename: *const c_char, epolicy: *const u8, epolicy_len: usize) -> Result<i64> {
+    fn isded_open_new(
+        #[edl("in, string")] filename: *const c_char,
+        #[edl("in, size=epolicy_len")] epolicy: *const u8,
+        epolicy_len: usize) -> Result<i64> {
         let filename = unsafe { CStr::from_ptr(filename) }.to_str().unwrap();
         let epolicy = unsafe { std::slice::from_raw_parts(epolicy, epolicy_len) };
 
@@ -124,7 +129,11 @@ ecall_define! {
 
 ecall_define! {
     /// openしたファイルを出力
-    fn isded_read(handle: i64, buf: *mut u8, count: usize) -> Result<i64> {
+    fn isded_read(
+        handle: i64,
+        #[edl("out, size=count")] buf: *mut u8,
+        count: usize
+    ) -> Result<i64> {
         let buf = unsafe { std::slice::from_raw_parts_mut(buf, count) };
         let mut open_handles = OPEN_HANDLES.lock().unwrap();
         if let Some(file) = open_handles.get_mut(&handle) {
@@ -138,7 +147,11 @@ ecall_define! {
 
 ecall_define! {
     /// データを DH 鍵で復号してから seal し、open_new したファイルに追記
-    fn isded_write(handle: i64, echunk: *const u8, echunk_len: usize) -> Result<()> {
+    fn isded_write(
+        handle: i64,
+        #[edl("in, size=echunk_len")] echunk: *const u8,
+        echunk_len: usize
+    ) -> Result<()> {
         let echunk = unsafe { std::slice::from_raw_parts(echunk, echunk_len) };
         let mut open_handles = OPEN_HANDLES.lock().unwrap();
         if let Some(file) = open_handles.get_mut(&handle) {
@@ -176,7 +189,7 @@ ecall_define! {
 
 ecall_define! {
     fn isded_close(
-        handle: int64_t,
+        handle: int64_t
     ) -> Result<()> {
         let mut open_handles = OPEN_HANDLES.lock().unwrap();
         if let Some(file) = open_handles.remove(&handle) {
@@ -191,7 +204,10 @@ ecall_define! {
 
 
 ecall_define! {
-    fn test_policy(policy: *const c_char, times: u64) -> Result<()> {
+    fn test_policy(
+        #[edl("in, string")] policy: *const c_char,
+        times: u64
+    ) -> Result<()> {
         let policy = unsafe { CStr::from_ptr(policy).to_str().unwrap() };
         output_policy::validate(policy)?;
         println!("validation passed!");

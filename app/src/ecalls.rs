@@ -10,7 +10,7 @@ macro_rules! ecall_define {
     (
         $(#[$attr:meta])*
         fn $fn_name:ident (
-            $($arg:ident : $arg_ty:ty),* $(,)*
+            $($(#[edl($e:expr)])* $arg:ident : $arg_ty:ty),* $(,)*
         ) -> Result<$ok_ty:tt> // needed to be tt
         $body:tt
     ) => (
