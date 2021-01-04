@@ -7,7 +7,7 @@
 extern crate sgx_tstd as std;
 
 mod error;
-mod ecall;
+mod ecalls;
 //mod guid;
 mod jwtmc;
 mod output_policy;
@@ -16,4 +16,4 @@ mod s_expression;
 //mod wave64;
 mod crypto;
 
-pub use ecall::*;
+pub use ecalls::*;
