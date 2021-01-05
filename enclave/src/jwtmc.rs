@@ -90,6 +90,29 @@ struct ResCtrInitOk {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+struct ReqCtrPeek {
+    msgtype: String,
+    nonce: Nonce,
+    key: Key,
+}
+impl ReqCtrPeek {
+    fn new(nonce: Nonce, key: Key) -> Self {
+        ReqCtrPeek {
+            msgtype: "ctr_peek".to_owned(),
+            nonce: nonce,
+            key: key,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ResCtrPeekOk {
+    msgtype: String, // "ctr_peek_ok"
+    nonce: Nonce,
+    ctr: Ctr,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct ReqCtrAccess {
     msgtype: String,
     nonce0: Nonce,
@@ -203,6 +226,31 @@ pub fn ctr_init<A: ToSocketAddrs>(addr: A) -> JWTMCResult<(Key, Ctr)> {
     }
 
     Ok((res_ok.claims.key, res_ok.claims.ctr))
+}
+
+pub fn ctr_peek<A: ToSocketAddrs>(addr: A, key: Key) -> JWTMCResult<Ctr> {
+    let stream = TcpStream::connect(addr)?;
+    let mut stream = BufStream::new(stream);
+
+    let nonce = rand::random::<u32>().into();
+    let req = encode(&ReqCtrPeek::new(nonce, key))?;
+    stream.write_all(&req)?;
+    stream.flush()?;
+
+    let mut res = String::new();
+    stream.read_line(&mut res)?;
+
+    let restype = decode::<Res>(&res)?.claims.msgtype;
+    let res_ok = match restype.as_str() {
+        "ctr_peek_ok" => decode::<ResCtrPeekOk>(&res)?,
+        "error" => return Err(JWTMCError::from_res(&decode::<ResError>(&res)?.claims)),
+        _ => return Err(JWTMCError::InvalidResponseError),
+    };
+    if nonce != res_ok.claims.nonce {
+        return Err(JWTMCError::ClientNonceMismatchError);
+    }
+
+    Ok(res_ok.claims.ctr)
 }
 
 pub fn ctr_access<A: ToSocketAddrs>(addr: A, key: Key, inc: Ctr) -> JWTMCResult<Ctr> {

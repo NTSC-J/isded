@@ -64,7 +64,7 @@ ecall_define! {
     ) -> Result<i64> {
         let filename = unsafe { CStr::from_ptr(filename).to_str().unwrap() };
         let file = file::ISDEDFile::open_read(&filename)?;
-        let real_mc_value = jwtmc::ctr_access(&MC_ADDR, file.mc_handle, 0.0)?;
+        let real_mc_value = jwtmc::ctr_peek(&MC_ADDR, file.mc_handle)?;
         if real_mc_value != file.mc_value {
             return Err(Error::RollbackError(real_mc_value, file.mc_value));
         }
