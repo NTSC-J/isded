@@ -257,12 +257,13 @@ pub fn subcommand_open(matches: &ArgMatches) -> Result<(), Error> {
 
     // TODO: support stdin
     let filename = matches.value_of("input").expect("specify the filename!");
+    let bufsize = value_t!(matches.value_of("bufsize"), usize).unwrap_or(1048576);
 
     let filename = CString::new(filename)?;
     let handle = unsafe { ecall!(enclave, isded_open(filename.as_ptr())) };
     info!("Opened file handle: {}", handle);
 
-    let mut buf = vec![0u8; 4096];
+    let mut buf = vec![0u8; bufsize];
     while {
         let nread = unsafe { ecall!(enclave, isded_read(handle, buf.as_mut_ptr(), buf.len().try_into().unwrap())) };
         if nread < 0 {

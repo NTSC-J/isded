@@ -62,6 +62,11 @@ subcommands:
                 short: i
                 help: the name of the input file
                 index: 1
+            - bufsize:
+                long: bufsize
+                short: b
+                help: buffer size for reading data
+                takes_value: true
     - eval:
         about: Evaluates an output policy for testing purpose
         args:
