@@ -22,7 +22,7 @@ pub fn init_enclave() -> SgxResult<SgxEnclave> {
             true
         },
         None => {
-            println!("Cannot get home dir");
+            info!("Cannot get home dir");
             false
         }
     };
@@ -31,12 +31,12 @@ pub fn init_enclave() -> SgxResult<SgxEnclave> {
     if use_token {
         match File::open(&token_file) {
             Err(_) => {
-                println!("[-] Open token file {} error! Will create one.", token_file.as_path().to_str().unwrap());
+                info!("Open token file {} error! Will create one.", token_file.as_path().to_str().unwrap());
             },
             Ok(mut f) => {
                 match f.read(&mut launch_token) {
                     Ok(1024) => {},
-                    _ => println!("[+] Token file invalid, will create new token file"),
+                    _ => info!("Token file invalid, will create new token file"),
                 }
             }
         }
@@ -58,15 +58,14 @@ pub fn init_enclave() -> SgxResult<SgxEnclave> {
         match File::create(&token_file) {
             Ok(mut f) => {
                 if f.write_all(&launch_token).is_err() {
-                    println!("[-] Failed to save updated launch token!");
+                    info!("Failed to save updated launch token!");
                 }
             },
             Err(_) => {
-                println!("[-] Failed to save updated enclave token, but doesn't matter");
+                info!("Failed to save updated enclave token, but doesn't matter");
             },
         }
     }
 
     Ok(enclave)
 }
-
