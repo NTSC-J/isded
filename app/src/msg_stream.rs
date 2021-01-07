@@ -70,10 +70,9 @@ impl MsgStream {
         let msgtype = (msgtype as u32).to_be_bytes();
         let len: u64 = msg.len().try_into().unwrap();
         let len = len.to_be_bytes();
-        &mut self.0.write_all(&msgtype)?;
-        &mut self.0.write_all(&len)?;
-        &mut self.0.write_all(&msg)?;
+        self.0.write_all(&msgtype)?;
+        self.0.write_all(&len)?;
+        self.0.write_all(&msg)?;
         Ok(())
     }
 }
-

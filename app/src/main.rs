@@ -60,7 +60,7 @@ fn main() -> Result<(), Error> {
             eprintln_help();
             Err(e)
         },
-        Ok(o) => Ok(o)
+        Ok(_) => Ok(())
     }
 }
 

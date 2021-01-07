@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use std::fs::File;
 use std::io::{Read, Write};
 
-const ENCLAVE_FILE: &'static str = "enclave.signed.so";
-const ENCLAVE_TOKEN: &'static str = "enclave.token";
+const ENCLAVE_FILE: &str = "enclave.signed.so";
+const ENCLAVE_TOKEN: &str = "enclave.token";
 
 pub fn init_enclave() -> SgxResult<SgxEnclave> {
     info!("init_enclave()");

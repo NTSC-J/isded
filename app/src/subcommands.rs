@@ -230,7 +230,7 @@ pub fn subcommand_recv(matches: &ArgMatches) -> Result<(), Error> {
     let mut qe_report = sgx_report_t::default();
     unsafe {
         let mut quote_size = 0;
-        let p_sigrl = if sigrl.len() == 0 { ptr::null() } else { sigrl.as_ptr() };
+        let p_sigrl = if sigrl.is_empty() { ptr::null() } else { sigrl.as_ptr() };
         check_status!(sgx_calc_quote_size(p_sigrl, sigrl.len().try_into()?, &mut quote_size as *mut uint32_t));
         quote = vec![0u8; quote_size as usize];
         let p_quote = quote.as_mut_ptr() as *mut sgx_quote_t;
@@ -291,7 +291,7 @@ pub fn subcommand_open(matches: &ArgMatches) -> Result<(), Error> {
 
     let mut buf = vec![0u8; bufsize];
     while {
-        let nread = unsafe { ecall!(enclave, isded_read(handle, buf.as_mut_ptr(), buf.len().try_into().unwrap())) };
+        let nread = unsafe { ecall!(enclave, isded_read(handle, buf.as_mut_ptr(), buf.len())) };
         if nread < 0 {
             warn!("read_file() returned {}", nread);
         }
