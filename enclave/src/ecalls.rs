@@ -23,7 +23,6 @@ lazy_static! {
     static ref QE_INFO: Mutex<Option<(sgx_target_info_t, sgx_epid_group_id_t)>> = Mutex::new(None);
     static ref KEY: Mutex<Option<(sgx_ec256_private_t, sgx_ec256_public_t)>> = Mutex::new(None);
     static ref DHKEY: Mutex<Option<sgx_ec256_dh_shared_t>> = Mutex::new(None);
-    static ref NONCE: Mutex<Option<sgx_quote_nonce_t>> = Mutex::new(None);
     static ref OPEN_HANDLES: Mutex<BTreeMap<i64, ISDEDFile>> = Mutex::new(BTreeMap::new());
 }
 

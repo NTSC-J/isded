@@ -17,7 +17,6 @@ use clap::*;
 use failure::{bail, Error};
 use std::result::Result;
 use sgx_ucrypto::{SgxEccHandle, rsgx_sha256_slice};
-use rand::random as rand_random; // FIXME
 use std::convert::TryInto;
 use std::mem;
 use std::net::{TcpStream, TcpListener, Ipv4Addr};
@@ -67,26 +66,17 @@ pub fn subcommand_send(matches: &ArgMatches) -> Result<(), Error> {
     let port = value_t!(matches.value_of("port"), u16).unwrap_or(ISDED_PORT);
     let bufsize = value_t!(matches.value_of("bufsize"), usize).unwrap_or(1048576);
 
-    info!("Creating RA start request...");
+    info!("Creating EC key pair...");
     let ecc = SgxEccHandle::new();
     ecc.open().unwrap();
     let (private_key, public_key) = ecc.create_key_pair().unwrap();
-    let nonce = sgx_quote_nonce_t {
-        rand: rand_random::<u128>().to_be_bytes()
-    };
-    let start_request = {
-        let mut start_request = Vec::new();
-        start_request.extend(unsafe { as_bytes!(&nonce, sgx_quote_nonce_t) });
-        start_request.extend(unsafe { as_bytes!(&public_key, sgx_ec256_public_t) });
-        start_request
-    };
 
     info!("Opening socket to {}:{}", host, port);
     let stream = TcpStream::connect(format!("{}:{}", host, port))?;
     let mut stream = MsgStream::new(stream);
 
-    info!("Sending RA start request...");
-    stream.write_msg(MsgType::StartRequest, &start_request)?;
+    info!("Sending EC public key...");
+    stream.write_msg(MsgType::StartRequest, unsafe { as_bytes!(&public_key, sgx_ec256_public_t) })?;
 
     info!("Fetching QUOTE...");
     let quote = stream.read_msg_of_type(MsgType::Quote)?;
@@ -203,18 +193,15 @@ pub fn subcommand_recv(matches: &ArgMatches) -> Result<(), Error> {
     let mut stream = MsgStream::new(stream);
     info!("Accepted connection: {:?}", &addr);
 
-    info!("Reading start request...");
+    info!("Reading sender's public key...");
     let req = stream.read_msg_of_type(MsgType::StartRequest)?;
-    let nonce_len = mem::size_of::<sgx_quote_nonce_t>();
-    let ga_len = mem::size_of::<sgx_ec256_public_t>();
-    assert_eq!(req.len(), nonce_len + ga_len);
-    let p_nonce = req[0..nonce_len].as_ptr() as *const sgx_quote_nonce_t;
-    let p_ga = req[nonce_len..nonce_len + ga_len].as_ptr() as *const sgx_ec256_public_t;
+    assert_eq!(req.len(), mem::size_of::<sgx_ec256_public_t>());
+    let p_ga = req.as_ptr() as *const sgx_ec256_public_t;
 
     info!("Creating REPORT for QE...");
     let mut report = sgx_report_t::default();
     let mut pubkeys = vec![0u8; 128];
-    unsafe { ecall!(enclave, start_request(p_ga, p_nonce, &mut report, pubkeys.as_mut_ptr())); }
+    unsafe { ecall!(enclave, start_request(p_ga, &mut report, pubkeys.as_mut_ptr())); }
 
     info!("Getting QUOTE...");
     let sign_type = sgx_quote_sign_type_t::SGX_UNLINKABLE_SIGNATURE;
@@ -228,15 +215,17 @@ pub fn subcommand_recv(matches: &ArgMatches) -> Result<(), Error> {
 
     let mut quote;
     let mut qe_report = sgx_report_t::default();
+    let quote_nonce = sgx_quote_nonce_t::default(); // unused
     unsafe {
         let mut quote_size = 0;
         let p_sigrl = if sigrl.is_empty() { ptr::null() } else { sigrl.as_ptr() };
         check_status!(sgx_calc_quote_size(p_sigrl, sigrl.len().try_into()?, &mut quote_size as *mut uint32_t));
         quote = vec![0u8; quote_size as usize];
         let p_quote = quote.as_mut_ptr() as *mut sgx_quote_t;
-        check_status!(sgx_get_quote(&report, sign_type, &spid, p_nonce, p_sigrl, sigrl.len().try_into()?, &mut qe_report, p_quote, quote_size));
+        check_status!(sgx_get_quote(&report, sign_type, &spid, &quote_nonce, p_sigrl, sigrl.len().try_into()?, &mut qe_report, p_quote, quote_size));
         // TODO: verify QE's REPORT
     }
+
     info!("Sending back QUOTE...");
     stream.write_msg(MsgType::Quote, &quote)?;
     info!("Sending back public keys...");

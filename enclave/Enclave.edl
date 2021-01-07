@@ -13,7 +13,7 @@ enclave {
 
     trusted {
         public int64_t set_qe_info([in] const sgx_target_info_t *target_info, [in] const sgx_epid_group_id_t *epid_group_id);
-        public int64_t start_request([in] const sgx_ec256_public_t *ga, [in] const sgx_quote_nonce_t *nonce, [out] sgx_report_t *report, [out, size=128] uint8_t *pubkeys);
+        public int64_t start_request([in] const sgx_ec256_public_t *ga, [out] sgx_report_t *report, [out, size=128] uint8_t *pubkeys);
         public int64_t isded_open([in, string] const char *filename);
         public int64_t isded_open_new([in, string] const char *filename, [in, size=epolicy_len] const uint8_t *epolicy, size_t epolicy_len);
         public int64_t isded_read(int64_t handle, [out, size=count] uint8_t *buf, size_t count);

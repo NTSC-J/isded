@@ -15,12 +15,10 @@ ecall_define! {
     /// DH key is calculated within this function
     fn start_request(
         #[edl("in")] ga: *const sgx_ec256_public_t,
-        #[edl("in")] nonce: *const sgx_quote_nonce_t,
         #[edl("out")] report: *mut sgx_report_t,
         #[edl("out, size=128")] pubkeys: *mut u8,
     ) -> Result<()> {
         let ga = unsafe { &*ga };
-        let nonce = unsafe { &*nonce };
         let report = unsafe { &mut *report };
         let pubkeys = unsafe { std::slice::from_raw_parts_mut(pubkeys, 128) };
 
@@ -33,9 +31,6 @@ ecall_define! {
 
         let mut dhkey = DHKEY.lock().unwrap();
         dhkey.replace(handle.compute_shared_dhkey(&private_key, ga)?);
-
-        let mut nonce_ = NONCE.lock().unwrap();
-        nonce_.replace(*nonce);
 
         pubkeys[..32].clone_from_slice(&ga.gx);
         pubkeys[32..64].clone_from_slice(&ga.gy);
