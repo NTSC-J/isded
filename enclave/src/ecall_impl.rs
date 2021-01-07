@@ -16,33 +16,40 @@ ecall_define! {
     fn start_request(
         #[edl("in")] ga: *const sgx_ec256_public_t,
         #[edl("in")] nonce: *const sgx_quote_nonce_t,
-        #[edl("out")] report: *mut sgx_report_t
+        #[edl("out")] report: *mut sgx_report_t,
+        #[edl("out, size=128")] pubkeys: *mut u8,
     ) -> Result<()> {
         let ga = unsafe { &*ga };
         let nonce = unsafe { &*nonce };
         let report = unsafe { &mut *report };
+        let pubkeys = unsafe { std::slice::from_raw_parts_mut(pubkeys, 128) };
 
         let handle = SgxEccHandle::new();
         handle.open()?;
 
-        let mut key = KEY.lock().unwrap(); // TODO
+        let mut key = KEY.lock().unwrap();
         let (private_key, public_key) = handle.create_key_pair()?;
         key.replace((private_key, public_key));
 
-        let mut dhkey = DHKEY.lock().unwrap(); // TODO
+        let mut dhkey = DHKEY.lock().unwrap();
         dhkey.replace(handle.compute_shared_dhkey(&private_key, ga)?);
 
-        let mut nonce_ = NONCE.lock().unwrap(); // TODO
+        let mut nonce_ = NONCE.lock().unwrap();
         nonce_.replace(*nonce);
+
+        pubkeys[..32].clone_from_slice(&ga.gx);
+        pubkeys[32..64].clone_from_slice(&ga.gy);
+        pubkeys[64..96].clone_from_slice(&public_key.gx);
+        pubkeys[96..].clone_from_slice(&public_key.gy);
+
+        let pubkey_hash = rsgx_sha256_slice(&pubkeys)?;
 
         // report_data: Additional data bound with REPORT
         // contains this enclave's public key (gb)
         // TODO: should include ga too?
         let report_data = {
             let mut r = sgx_report_data_t::default();
-            // TODO: reverse?
-            r.d[..32].clone_from_slice(&public_key.gx);
-            r.d[32..].clone_from_slice(&public_key.gy);
+            r.d[..32].clone_from_slice(&pubkey_hash);
             r
         };
 

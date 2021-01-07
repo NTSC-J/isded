@@ -16,7 +16,7 @@ use std::ffi::CString;
 use clap::*;
 use failure::{bail, Error};
 use std::result::Result;
-use sgx_ucrypto::SgxEccHandle;
+use sgx_ucrypto::{SgxEccHandle, rsgx_sha256_slice};
 use rand::random as rand_random; // FIXME
 use std::convert::TryInto;
 use std::mem;
@@ -89,8 +89,21 @@ pub fn subcommand_send(matches: &ArgMatches) -> Result<(), Error> {
     stream.write_msg(MsgType::StartRequest, &start_request)?;
 
     info!("Fetching QUOTE...");
-    let quote = stream.read_msg_that_is(MsgType::Quote)?;
+    let quote = stream.read_msg_of_type(MsgType::Quote)?;
     info!("Received QUOTE size: {}", quote.len());
+
+    // (SApp key, RE(isv) key)
+    info!("Fetching ECDH public keys...");
+    let pubkeys = stream.read_msg_of_type(MsgType::ECDHPubKeys)?;
+    if pubkeys.len() != 128 { // 2 * sgx_ec256_public_t
+        bail!("invalid public key length");
+    }
+    let isv_public_key = {
+        let mut k = sgx_ec256_public_t::default();
+        k.gx.clone_from_slice(&pubkeys[64..96]);
+        k.gy.clone_from_slice(&pubkeys[96..128]);
+        k
+    };
 
     info!("Verifying QUOTE...");
     if let Err(e) = ias::verify_quote(&quote) {
@@ -106,16 +119,26 @@ pub fn subcommand_send(matches: &ArgMatches) -> Result<(), Error> {
 
     info!("MRENCLAVE: {}", hex::encode(&quote.report_body.mr_enclave.m));
     info!("MRSIGNER: {}", hex::encode(&quote.report_body.mr_signer.m));
-    // TODO: nonceはどこ？
 
-    let mut isv_public_key = sgx_ec256_public_t::default();
-    isv_public_key.gx.clone_from_slice(&quote.report_body.report_data.d[..32]);
-    isv_public_key.gy.clone_from_slice(&quote.report_body.report_data.d[32..]);
+    info!("Verifying validity of public keys...");
+    info!("Public key sent:   {}", unsafe { as_hex!(&public_key, sgx_ec256_public_t) });
+    info!("Public key recv'd: {}", hex::encode(&pubkeys[..64]));
+    if unsafe { as_bytes!(&public_key, sgx_ec256_public_t) } != &pubkeys[..64] {
+        bail!("Public keys don't match");
+    }
+    info!("Public keys match OK!");
+    let hash_computed = rsgx_sha256_slice(&pubkeys).unwrap();
+    let hash_reported = &quote.report_body.report_data.d[..32];
+    info!("Computed hash: {}", hex::encode(&hash_computed));
+    info!("Reported hash: {}", hex::encode(&hash_reported));
+    if hash_computed != hash_reported {
+        bail!("Public keys' hash in REPORT invalid");
+    }
+    info!("Public keys' hash OK!");
 
     info!("Computing shared key...");
     // 256-bit shared key (x-coordinate)
     let dhkey = ecc.compute_shared_dhkey(&private_key, &isv_public_key).unwrap();
-    // TODO: better KDF
     let mut aes_key = sgx_aes_gcm_128bit_key_t::default();
     aes_key.clone_from_slice(&dhkey.s[..16]);
 
@@ -181,7 +204,7 @@ pub fn subcommand_recv(matches: &ArgMatches) -> Result<(), Error> {
     info!("Accepted connection: {:?}", &addr);
 
     info!("Reading start request...");
-    let req = stream.read_msg_that_is(MsgType::StartRequest)?;
+    let req = stream.read_msg_of_type(MsgType::StartRequest)?;
     let nonce_len = mem::size_of::<sgx_quote_nonce_t>();
     let ga_len = mem::size_of::<sgx_ec256_public_t>();
     assert_eq!(req.len(), nonce_len + ga_len);
@@ -190,7 +213,8 @@ pub fn subcommand_recv(matches: &ArgMatches) -> Result<(), Error> {
 
     info!("Creating REPORT for QE...");
     let mut report = sgx_report_t::default();
-    unsafe { ecall!(enclave, start_request(p_ga, p_nonce, &mut report)); }
+    let mut pubkeys = vec![0u8; 128];
+    unsafe { ecall!(enclave, start_request(p_ga, p_nonce, &mut report, pubkeys.as_mut_ptr())); }
 
     info!("Getting QUOTE...");
     let sign_type = sgx_quote_sign_type_t::SGX_UNLINKABLE_SIGNATURE;
@@ -215,9 +239,11 @@ pub fn subcommand_recv(matches: &ArgMatches) -> Result<(), Error> {
     }
     info!("Sending back QUOTE...");
     stream.write_msg(MsgType::Quote, &quote)?;
+    info!("Sending back public keys...");
+    stream.write_msg(MsgType::ECDHPubKeys, &pubkeys)?;
 
     info!("Reading encrypted output policy...");
-    let policy = stream.read_msg_that_is(MsgType::EncryptedPolicy)?;
+    let policy = stream.read_msg_of_type(MsgType::EncryptedPolicy)?;
     let handle = unsafe {
         ecall!(enclave, isded_open_new(
                 CString::new(output_filename)?.as_ptr(),

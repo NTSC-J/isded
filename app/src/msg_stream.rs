@@ -12,6 +12,7 @@ use std::fmt::Display;
 pub enum MsgType {
     StartRequest = 0x15636010,
     Quote = 0x15636020,
+    ECDHPubKeys = 0x15636021,
     EncryptedPolicy = 0x15636030,
     EncryptedDataChunk = 0x15636040,
     Finished = 0x156360ff,
@@ -56,7 +57,7 @@ impl MsgStream {
     }
 
     /// read msg and the type should be this
-    pub fn read_msg_that_is(&mut self, msgtype: MsgType) -> Result<Vec<u8>, MsgStreamError> {
+    pub fn read_msg_of_type(&mut self, msgtype: MsgType) -> Result<Vec<u8>, MsgStreamError> {
         let (t, m) = self.read_msg()?;
         if t != msgtype {
             return Err(MsgStreamError::UnexpectedMsgTypeError(msgtype, t));

@@ -31,7 +31,7 @@ macro_rules! ecall {
             let s = $name($enclave.geteid(), &mut r, $($arg),*);
             match s {
                 sgx_status_t::SGX_SUCCESS => if r < 0 {
-                    eprintln!("ecall error: {}", r)
+                    eprintln!("ecall error: {:#x}", -r)
                 },
                 _ => eprintln!("sgx error: {}", s)
             };

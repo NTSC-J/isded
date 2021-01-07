@@ -4,7 +4,7 @@ use crate::error::{Error, Result};
 use crate::file::ISDEDFile;
 use lazy_static::lazy_static;
 use libc::c_char;
-use sgx_tcrypto::SgxEccHandle;
+use sgx_tcrypto::{SgxEccHandle, rsgx_sha256_slice};
 use sgx_types::*;
 use std::backtrace::{self, PrintFormat};
 use std::convert::TryInto;
