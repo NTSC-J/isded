@@ -68,8 +68,8 @@ fn interpret(expr: &S, env: Environment, mode: InterpretMode) -> OutputPolicyRes
 
 fn interpret_atom(atom: &str, mut env: Environment, mode: InterpretMode) -> OutputPolicyResult<(Value, Environment)> {
     match atom {
-        "true" => Ok((Value::Bool(true), env.clone())),
-        "false" => Ok((Value::Bool(false), env.clone())),
+        "true" => Ok((Value::Bool(true), env)),
+        "false" => Ok((Value::Bool(false), env)),
         _ => {
             if let Ok(num) = atom.parse() {
                 Ok((Value::I64(num), env))
@@ -77,7 +77,7 @@ fn interpret_atom(atom: &str, mut env: Environment, mode: InterpretMode) -> Outp
                 env.insert(atom.to_string(), Value::I64(0));
                 Ok((Value::I64(0), env))
             } else if env.contains_key(atom) {
-                Ok((env.get(atom).unwrap().clone(), env))
+                Ok((*env.get(atom).unwrap(), env))
             } else {
                 Err(OutputPolicyError::UnexpectedIdentifierError(atom.to_string()))
             }
@@ -113,7 +113,7 @@ fn interpret_fn(name: &str, args: &[S], mut env: Environment, mode: InterpretMod
             let (args, env) = interpret_args(args, env, mode)?;
             match args[..] {
                 [Value::I64(a), Value::I64(b)] => Ok((Value::Bool(a < b), env)),
-                _ => return Err(OutputPolicyError::FunctionError("<".to_string())),
+                _ => Err(OutputPolicyError::FunctionError("<".to_string())),
             }
         }
         ">" => { // I64 -> I64 -> Bool
@@ -121,7 +121,7 @@ fn interpret_fn(name: &str, args: &[S], mut env: Environment, mode: InterpretMod
             let (args, env) = interpret_args(args, env, mode)?;
             match args[..] {
                 [Value::I64(a), Value::I64(b)] => Ok((Value::Bool(a > b), env)),
-                _ => return Err(OutputPolicyError::FunctionError(">".to_string())),
+                _ => Err(OutputPolicyError::FunctionError(">".to_string())),
             }
         }
         "==" => { // a -> a -> Bool
@@ -130,7 +130,7 @@ fn interpret_fn(name: &str, args: &[S], mut env: Environment, mode: InterpretMod
             match args[..] {
                 [Value::I64(a), Value::I64(b)] => Ok((Value::Bool(a == b), env)),
                 [Value::Bool(a), Value::Bool(b)] => Ok((Value::Bool(a == b), env)),
-                _ => return Err(OutputPolicyError::FunctionError("==".to_string())),
+                _ => Err(OutputPolicyError::FunctionError("==".to_string())),
             }
         }
         "and" => { // [Bool] -> Bool, 短絡評価
@@ -162,7 +162,7 @@ fn interpret_fn(name: &str, args: &[S], mut env: Environment, mode: InterpretMod
             let (expr, env) = interpret(&args[0], env, mode)?;
             match expr {
                 Value::Bool(b) => Ok((Value::Bool(!b), env)),
-                _ => return Err(OutputPolicyError::FunctionError("not".to_string())),
+                _ => Err(OutputPolicyError::FunctionError("not".to_string())),
             }
         }
         "timevalue" => { // String -> I64
@@ -174,7 +174,7 @@ fn interpret_fn(name: &str, args: &[S], mut env: Environment, mode: InterpretMod
             // オフセットが違ってもtimestampの起点は同一(Unix epoch)
             Ok((Value::I64(
                 DateTime::<FixedOffset>::parse_from_rfc3339(&s)
-                    .map_err(|e| OutputPolicyError::ParseDateTimeError(e))?
+                    .map_err(OutputPolicyError::ParseDateTimeError)?
                     .timestamp_millis()
             ), env))
         }
@@ -200,7 +200,7 @@ fn interpret_fn(name: &str, args: &[S], mut env: Environment, mode: InterpretMod
                 return Ok((Value::I64(0), env));
             }
             match env.get(&var) {
-                None => return Err(OutputPolicyError::InvalidVariableNameError),
+                None => Err(OutputPolicyError::InvalidVariableNameError),
                 Some(Value::I64(x)) => {
                     let newx = Value::I64(x + 1);
                     env.insert(var, newx);

@@ -49,19 +49,19 @@ impl Read for MySgxFileStream {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         self.0
             .read(buf)
-            .map_err(|x| std::io::Error::from_raw_os_error(x))
+            .map_err(std::io::Error::from_raw_os_error)
     }
 }
 impl Write for MySgxFileStream {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.0
             .write(buf)
-            .map_err(|x| std::io::Error::from_raw_os_error(x))
+            .map_err(std::io::Error::from_raw_os_error)
     }
     fn flush(&mut self) -> std::io::Result<()> {
         self.0
             .flush()
-            .map_err(|x| std::io::Error::from_raw_os_error(x))
+            .map_err(std::io::Error::from_raw_os_error)
     }
 }
 impl Seek for MySgxFileStream {
@@ -73,7 +73,7 @@ impl Seek for MySgxFileStream {
             SeekFrom::Current(x) => self.0.seek(x, SgxSeekFrom::Current),
         }
         .and_then(|_| self.0.tell())
-        .map_err(|x| std::io::Error::from_raw_os_error(x))
+        .map_err(std::io::Error::from_raw_os_error)
         .map(|x| x.try_into().unwrap()) // i64 into u64
     }
 }
@@ -127,8 +127,8 @@ impl ISDEDFile{
             reader: Some(Box::new(reader)),
             writer: None,
             output_policy: policy,
-            mc_handle: mc_handle,
-            mc_value: mc_value,
+            mc_handle,
+            mc_value,
             environment: env,
         })
     }
@@ -155,9 +155,9 @@ impl ISDEDFile{
             reader: None,
             writer: Some(Box::new(datafile)),
             output_policy: output_policy.to_owned(),
-            mc_handle: mc_handle,
-            mc_value: mc_value,
-            environment: environment,
+            mc_handle,
+            mc_value,
+            environment,
         })
     }
 

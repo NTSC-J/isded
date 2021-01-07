@@ -181,8 +181,8 @@ ecall_define! {
         if let Some(file) = open_handles.get_mut(&handle) {
             let pos = match whence {
                 0 => Start(offset.try_into().unwrap()),
-                1 => End(offset.try_into().unwrap()),
-                2 => Current(offset.try_into().unwrap()),
+                1 => End(offset),
+                2 => Current(offset),
                 _ => return Err(Error::InvalidParameterError),
             };
             // FIXME

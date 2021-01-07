@@ -1,3 +1,5 @@
+#![allow(clippy::float_cmp)]
+
 use std::prelude::v1::*;
 use crate::{file, jwtmc, output_policy, crypto};
 use crate::error::{Error, Result};
@@ -50,7 +52,8 @@ macro_rules! ecall_define {
         pub extern "C" fn $fn_name($($arg:$arg_ty),*) -> i64 {
             let _ = backtrace::enable_backtrace("enclave.signed.so", PrintFormat::Full); // TODO
             // TODO: std::panic::catch_unwind
-            let result: Result<$ok_ty> = (|| { $body })();
+            #[allow(clippy::redundant_closure_call)]
+            let result: Result<$ok_ty> = (||{ $body })();
             match result {
                 #[allow(unused_variables)]
                 Ok(x) => to_i64!(x, $ok_ty),

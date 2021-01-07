@@ -1,3 +1,5 @@
+#![allow(clippy::float_cmp)]
+
 use bufstream::BufStream;
 use chrono::prelude::*;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, TokenData, Validation};
@@ -74,7 +76,7 @@ impl ReqCtrInit {
     fn new(nonce: Nonce) -> Self {
         ReqCtrInit {
             msgtype: "ctr_init".to_owned(),
-            nonce: nonce,
+            nonce,
             // FIXME: !!!!!
             pubkey: r#"{"e":"AQAB","kid":"oi4yXRRUW2nbIimn_P0dLfVgnO2TMUuIze0Qx5vM9jU","kty":"RSA","n":"wuxmKcJMeIH1XqPpp9RpTKe0wjcDzYu_45SvMzU55imGr7qZaiY1lqRiGXlL4_yIT0QdIFBkG3FKn6V-7bvwN5tAOePBVy832ACHyPhDuGg97rijLchRoE4vu9L8TIXD-5lgRRpzb2X7_9D_5Nis_G-7rRRtx5Itk8rKEtHfj3z7Kqes7CkCBvXgASSUq1RYU0XOg8MzKaILFE65ULX4-DDzRcDcM0e0ky25nbGqBXFFFVyRsTSVRKXdELGAfHBmyR79_ryYub9cGwlEstDGRiCfsihQWuaAS1323Bo-ZvjMvx9OmiGsMoQURFEQ9K_wt3I3OO9vbpGTaxuKJx8L-w"}"#.to_owned(),
         }
@@ -99,8 +101,8 @@ impl ReqCtrPeek {
     fn new(nonce: Nonce, key: Key) -> Self {
         ReqCtrPeek {
             msgtype: "ctr_peek".to_owned(),
-            nonce: nonce,
-            key: key,
+            nonce,
+            key,
         }
     }
 }
@@ -123,9 +125,9 @@ impl ReqCtrAccess {
     fn new(nonce0: Nonce, key: Key, inc: Ctr) -> Self {
         ReqCtrAccess {
             msgtype: "ctr_access".to_owned(),
-            nonce0: nonce0,
-            key: key,
-            inc: inc,
+            nonce0,
+            key,
+            inc,
         }
     }
 }
@@ -147,8 +149,8 @@ impl ReqCtrAccessAck1 {
     fn new(nonce0: Nonce, nonce1: Nonce) -> Self {
         ReqCtrAccessAck1 {
             msgtype: "ctr_access_ack1".to_owned(),
-            nonce0: nonce0,
-            nonce1: nonce1,
+            nonce0,
+            nonce1,
         }
     }
 }
@@ -170,7 +172,7 @@ impl ReqTimeQuery {
     fn new(nonce: Nonce) -> Self {
         ReqTimeQuery {
             msgtype: "time_query".to_owned(),
-            nonce: nonce,
+            nonce,
         }
     }
 }
