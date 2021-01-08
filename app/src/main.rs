@@ -25,7 +25,8 @@ use subcommands::*;
 
 static APP_YAML: Lazy<yaml_rust::Yaml> = Lazy::new(|| load_yaml!("cli.yaml").clone());
 
-fn main() -> Result<(), Error> {
+#[tokio::main]
+async fn main() -> Result<(), Error> {
     env_logger::builder()
         .format(|buf, record| {
             writeln!(buf, "[{} {} {}] {}",
@@ -39,9 +40,10 @@ fn main() -> Result<(), Error> {
     let matches = get_clap_app().get_matches();
 
     let subcommand_result = match matches.subcommand() {
-        ("send", Some(sub_m)) => subcommand_send(&sub_m),
-        ("recv", Some(sub_m)) => subcommand_recv(&sub_m),
+        ("send", Some(sub_m)) => subcommand_send(&sub_m).await,
+        ("recv", Some(sub_m)) => subcommand_recv(&sub_m).await,
         ("open", Some(sub_m)) => subcommand_open(&sub_m),
+        ("serve", Some(sub_m)) => subcommand_serve(&sub_m).await,
         ("eval", Some(sub_m)) => subcommand_eval(&sub_m),
         ("test", Some(sub_m)) => subcommand_test(&sub_m),
         _ => if matches.is_present("version") {

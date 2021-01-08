@@ -3,7 +3,7 @@
 use std::prelude::v1::*;
 use crate::{file, jwtmc, output_policy, crypto};
 use crate::error::{Error, Result};
-use crate::file::ISDEDFile;
+use crate::file::{ISDEDFile, ISDEDFileStream};
 use lazy_static::lazy_static;
 use libc::c_char;
 use sgx_tcrypto::{SgxEccHandle, rsgx_sha256_slice};

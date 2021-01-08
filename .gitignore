@@ -9,6 +9,8 @@ Enclave_u.h
 Enclave_u.c
 .nfs*
 /bin
+/edlgen/target
+/edlgen/Enclave.edl
 /app/target
 /enclave/target
 /app/src/spid.txt

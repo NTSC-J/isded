@@ -16,7 +16,7 @@ ecall_define! {
     fn start_request(
         #[edl("in")] ga: *const sgx_ec256_public_t,
         #[edl("out")] report: *mut sgx_report_t,
-        #[edl("out, size=128")] pubkeys: *mut u8,
+        #[edl("out, size=128")] pubkeys: *mut u8
     ) -> Result<()> {
         let ga = unsafe { &*ga };
         let report = unsafe { &mut *report };
@@ -138,9 +138,31 @@ ecall_define! {
     ) -> Result<i64> {
         let buf = unsafe { std::slice::from_raw_parts_mut(buf, count) };
         let mut open_handles = OPEN_HANDLES.lock().unwrap();
-        if let Some(file) = open_handles.get_mut(&handle) {
-            let nread = file.reader.as_mut().unwrap().read(buf)?;
-            Ok(nread.try_into().unwrap())
+        if let Some(ref mut file) = open_handles.get_mut(&handle) {
+            if let ISDEDFileStream::Reader(ref mut reader) = file.stream {
+                let nread = reader.read(buf)?;
+                Ok(nread.try_into().unwrap())
+            } else {
+                Err(Error::UnsupportedOperationError)
+            }
+        } else {
+            Err(Error::InvalidHandleError)
+        }
+    }
+}
+
+ecall_define! {
+    /// データの大きさ
+    fn isded_stat_size(
+        handle: i64
+    ) -> Result<i64> {
+        let mut open_handles = OPEN_HANDLES.lock().unwrap();
+        if let Some(ref mut file) = open_handles.get_mut(&handle) {
+            if let ISDEDFileStream::Reader(ref mut reader) = file.stream {
+                Ok(reader.stream_len()?.try_into()?)
+            } else {
+                Err(Error::UnsupportedOperationError)
+            }
         } else {
             Err(Error::InvalidHandleError)
         }
@@ -156,13 +178,17 @@ ecall_define! {
     ) -> Result<()> {
         let echunk = unsafe { std::slice::from_raw_parts(echunk, echunk_len) };
         let mut open_handles = OPEN_HANDLES.lock().unwrap();
-        if let Some(file) = open_handles.get_mut(&handle) {
-            let dhkey = DHKEY.lock().unwrap().unwrap();
-            let mut key = sgx_aes_gcm_128bit_key_t::default();
-            key.clone_from_slice(&dhkey.s[..16]);
-            let chunk = crypto::decrypt(&key, &echunk);
-            file.writer.as_mut().unwrap().write_all(&chunk)?;
-            Ok(())
+        if let Some(ref mut file) = open_handles.get_mut(&handle) {
+            if let ISDEDFileStream::Writer(ref mut writer) = file.stream {
+                let dhkey = DHKEY.lock().unwrap().unwrap();
+                let mut key = sgx_aes_gcm_128bit_key_t::default();
+                key.clone_from_slice(&dhkey.s[..16]);
+                let chunk = crypto::decrypt(&key, &echunk);
+                writer.write_all(&chunk)?;
+                Ok(())
+            } else {
+                Err(Error::UnsupportedOperationError)
+            }
         } else {
             Err(Error::InvalidHandleError)
         }
@@ -173,16 +199,19 @@ ecall_define! {
     fn isded_seek(handle: i64, offset: i64, whence: i64) -> Result<i64> {
         use std::io::SeekFrom::*;
         let mut open_handles = OPEN_HANDLES.lock().unwrap();
-        if let Some(file) = open_handles.get_mut(&handle) {
+        if let Some(ref mut file) = open_handles.get_mut(&handle) {
             let pos = match whence {
                 0 => Start(offset.try_into().unwrap()),
                 1 => End(offset),
                 2 => Current(offset),
                 _ => return Err(Error::InvalidParameterError),
             };
-            // FIXME
-            let newpos = file.reader.as_mut().unwrap().seek(pos)?;
-            Ok(newpos.try_into().unwrap())
+            if let ISDEDFileStream::Reader(ref mut reader) = file.stream {
+                let newpos = reader.seek(pos)?;
+                Ok(newpos.try_into().unwrap())
+            } else {
+                Err(Error::UnsupportedOperationError)
+            }
         } else {
             Err(Error::InvalidHandleError)
         }
@@ -195,12 +224,13 @@ ecall_define! {
     ) -> Result<()> {
         let mut open_handles = OPEN_HANDLES.lock().unwrap();
         if let Some(file) = open_handles.remove(&handle) {
-            if let Some(mut writer) = file.writer {
+            if let ISDEDFileStream::Writer(mut writer) = file.stream {
                 writer.flush()?;
             }
+            Ok(())
+        } else {
+            Err(Error::InvalidHandleError)
         }
-
-        Ok(())
     }
 }
 

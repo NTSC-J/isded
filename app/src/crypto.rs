@@ -22,4 +22,3 @@ pub fn encrypt(key: &sgx_aes_gcm_128bit_key_t, src: &[u8]) -> Vec<u8> {
     ret.write_all(&dst).unwrap();
     ret
 }
-

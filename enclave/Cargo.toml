@@ -29,6 +29,3 @@ thiserror = { rev = "sgx_1.1.3", git = "https://github.com/mesalock-linux/thiser
 rand = { rev = "sgx_1.1.3", git = "https://github.com/mesalock-linux/rand-sgx.git" }
 hex = { rev = "sgx_1.1.3", git = "https://github.com/mesalock-linux/rust-hex-sgx.git" }
 bincode = { rev = "sgx_1.1.3", git = "https://github.com/mesalock-linux/bincode-sgx.git" }
-
-[build-dependencies]
-sgx_types = { git = "https://github.com/apache/teaclave-sgx-sdk.git", rev = "v1.1.3" }

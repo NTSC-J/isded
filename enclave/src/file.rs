@@ -91,10 +91,14 @@ pub trait WriteSeek: Send + Write + Seek + Debug {}
 impl WriteSeek for MySgxFileStream {}
 
 #[derive(Debug)]
+pub enum ISDEDFileStream {
+    Reader(Box<dyn ReadSeek>),
+    Writer(Box<dyn WriteSeek>),
+}
+#[derive(Debug)]
 pub struct ISDEDFile {
     // データ本体へのアクセス方法
-    pub reader: Option<Box<dyn ReadSeek>>,
-    pub writer: Option<Box<dyn WriteSeek>>,
+    pub stream: ISDEDFileStream,
     pub output_policy: String,
     pub mc_handle: jwtmc::Key,
     pub mc_value: jwtmc::Ctr,
@@ -124,8 +128,7 @@ impl ISDEDFile{
         let env = bincode::deserialize_from(&mut envfile)?;
 
         Ok(ISDEDFile {
-            reader: Some(Box::new(reader)),
-            writer: None,
+            stream: ISDEDFileStream::Reader(Box::new(reader)),
             output_policy: policy,
             mc_handle,
             mc_value,
@@ -152,8 +155,7 @@ impl ISDEDFile{
         bincode::serialize_into(envfile, &environment)?;
 
         Ok(ISDEDFile {
-            reader: None,
-            writer: Some(Box::new(datafile)),
+            stream: ISDEDFileStream::Writer(Box::new(datafile)),
             output_policy: output_policy.to_owned(),
             mc_handle,
             mc_value,

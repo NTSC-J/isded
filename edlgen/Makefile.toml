@@ -1,0 +1,12 @@
+[tasks.default]
+clear = true
+script = [
+    "cargo run"
+]
+
+[tasks.clear]
+clear = true
+script = [
+    "cargo clean",
+    "rm Enclave.edl"
+]

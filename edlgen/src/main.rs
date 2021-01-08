@@ -3,10 +3,16 @@ use std::io::Write;
 use std::os::raw::c_char;
 use sgx_types::*;
 
-const EDL_FILE: &'static str = "obj/Enclave.edl";
+const EDL_FILE: &'static str = "Enclave.edl";
 
 trait CTypeName {
     fn c_type_name() -> String;
+}
+impl<T: CTypeName> CTypeName for *const T {
+    fn c_type_name() -> String { format!("const {}*", <T>::c_type_name()) }
+}
+impl<T: CTypeName> CTypeName for *mut T {
+    fn c_type_name() -> String { format!("{}*", <T>::c_type_name()) }
 }
 
 macro_rules! impl_ctn {
@@ -18,13 +24,6 @@ macro_rules! impl_ctn {
     ($tn:ty) => (impl_ctn!{$tn, stringify!($tn)});
 }
 
-impl<T: CTypeName> CTypeName for *const T {
-    fn c_type_name() -> String { format!("const {}*", <T>::c_type_name()) }
-}
-impl<T: CTypeName> CTypeName for *mut T {
-    fn c_type_name() -> String { format!("{}*", <T>::c_type_name()) }
-}
-
 impl_ctn!(u8, "uint8_t");
 impl_ctn!(u64, "uint64_t");
 impl_ctn!(i64, "int64_t");
@@ -34,7 +33,6 @@ impl_ctn!(sgx_target_info_t);
 impl_ctn!(sgx_epid_group_id_t);
 impl_ctn!(sgx_report_t);
 impl_ctn!(sgx_ec256_public_t);
-impl_ctn!(sgx_quote_nonce_t);
 
 macro_rules! args_to_edl {
     () => ("".to_string());
@@ -87,7 +85,7 @@ enclave {{
         )
     }
 
-    include!("obj/ecall_impl_.rs");
+    include!("../obj/ecall_impl_.rs");
 
     write!(&mut edlfile, r#"    }};
 }};

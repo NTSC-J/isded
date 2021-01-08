@@ -27,15 +27,16 @@ struct IASResponse {
 }
 
 /// let IAS verify QUOTE
-pub fn verify_quote(quote: &[u8]) -> Result<(), Error> {
+pub async fn verify_quote(quote: &[u8]) -> Result<(), Error> {
     let mut req = HashMap::new();
     req.insert("isvEnclaveQuote", base64::encode(&quote[..]));
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::Client::new();
     let ias_uri = format!("https://{}{}", IAS_HOST, REPORT_SUFFIX);
     let res = client.post(&ias_uri)
             .header("Ocp-Apim-Subscription-Key", include_str!("api_key.txt"))
             .json(&req)
-            .send()?;
+            .send()
+            .await?;
 
     if res.status() != StatusCode::OK {
         bail!("IAS returned error: {:?}", &res);
@@ -44,7 +45,7 @@ pub fn verify_quote(quote: &[u8]) -> Result<(), Error> {
     let _sig = res.headers().get("X-IASReport-Signature").unwrap();
     let _cert = res.headers().get("X-IASReport-Signing-Certificate").unwrap();
 
-    let resbody = res.json::<IASResponse>()?;
+    let resbody = res.json::<IASResponse>().await?;
     match resbody.isvEnclaveQuoteStatus.as_str() {
         "OK" => Ok(()),
         "SIGNATURE_INVALID" => bail!("EPID signature of the ISV enclave QUOTE was invalid."),
@@ -74,18 +75,19 @@ pub fn verify_quote(quote: &[u8]) -> Result<(), Error> {
 }
 
 /// Get SigRL from IAS
-pub fn get_sigrl(epid_group_id: &sgx_epid_group_id_t) -> Result<Vec<u8>, Error> {
+pub async fn get_sigrl(epid_group_id: &sgx_epid_group_id_t) -> Result<Vec<u8>, Error> {
     let mut epid_group_id = *epid_group_id;
     epid_group_id.reverse();
     let ias_uri = format!("https://{}{}{}", IAS_HOST, SIGRL_SUFFIX, hex::encode(&epid_group_id));
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::Client::new();
     let res = client.get(&ias_uri)
         .header("Ocp-Apim-Subscription-Key", include_str!("api_key.txt"))
-        .send()?;
+        .send()
+        .await?;
     if res.status() != StatusCode::OK {
         bail!("IAS returned error: {:?}", &res);
     }
-    Ok(base64::decode(res.text()?).expect("decode failed"))
+    Ok(base64::decode(res.text().await?).expect("decode failed"))
 }
 
 

@@ -1,6 +1,6 @@
 [env]
 ENCLAVE = "Enclave"
-ENCLAVE_EDL = "../enclave/${ENCLAVE}.edl"
+ENCLAVE_EDL = "../edlgen/${ENCLAVE}.edl"
 SGX_SDK = { value = "/opt/intel/sgxsdk", condition = { env_not_set = ["SGX_SDK"] } }
 SGX_MODE = { value = "HW", condition = { env_not_set = ["SGX_MODE"] } }
 SGX_ARCH = { value = "x64", condition = { env_not_set = ["SGX_ARCH"] } }

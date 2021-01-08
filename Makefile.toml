@@ -4,15 +4,22 @@ BIN_DIR = "."
 BIN_APP = { source = "${CARGO_MAKE_PROFILE}", default_value = "app/target/debug/${APP_NAME}", mapping = {"development" = "app/target/debug/${APP_NAME}", "production" = "app/target/release/${APP_NAME}"} }
 BIN_ENCLAVE = "enclave/enclave.signed.so"
 
+[tasks.edl]
+script = [
+	"makers --cwd edlgen --profile=${CARGO_MAKE_PROFILE}"
+]
+
 [tasks.enclave]
 script = [
 	"makers --cwd enclave --profile=${CARGO_MAKE_PROFILE}"
 ]
+dependencies = ["edl"]
 
 [tasks.app]
 script = [
 	"makers --cwd app --profile=${CARGO_MAKE_PROFILE}"
 ]
+dependencies = ["edl"]
 
 [tasks.copy]
 script = [
@@ -28,6 +35,7 @@ dependencies = ["enclave", "app", "copy"]
 [tasks.clean]
 clear = true
 script = [
+	"makers --cwd edlgen clean",
 	"makers --cwd app clean",
 	"makers --cwd enclave clean",
 	"rm -f ${BIN_DIR}/${BIN_APP} ${BIN_DIR}/${BIN_ENCLAVE}"

@@ -23,6 +23,10 @@ use std::net::{TcpStream, TcpListener, Ipv4Addr};
 use std::ptr;
 use std::slice;
 use std::time::Instant;
+use once_cell::sync::OnceCell;
+use sgx_urts::SgxEnclave;
+use warp::{Filter, http::Response};
+use if_chain::if_chain;
 
 const ISDED_PORT: u16 = 5555;
 
@@ -49,11 +53,10 @@ macro_rules! check_status {
     };
 }
 
-
 /// send a self-destructing/emerging file to remote host
 ///
 /// start request: (nonce, public_key)
-pub fn subcommand_send(matches: &ArgMatches) -> Result<(), Error> {
+pub async fn subcommand_send<'a>(matches: &ArgMatches<'a>) -> Result<(), Error> {
     let benchmark_start = Instant::now();
 
     let mut input: Box<dyn Read> = if let Some(name) = matches.value_of("input") {
@@ -80,7 +83,7 @@ pub fn subcommand_send(matches: &ArgMatches) -> Result<(), Error> {
 
     info!("Fetching QUOTE...");
     let quote = stream.read_msg_of_type(MsgType::Quote)?;
-    info!("Received QUOTE size: {}", quote.len());
+    info!("Received QUOTE filesize: {}", quote.len());
 
     // (SApp key, RE(isv) key)
     info!("Fetching ECDH public keys...");
@@ -96,7 +99,7 @@ pub fn subcommand_send(matches: &ArgMatches) -> Result<(), Error> {
     };
 
     info!("Verifying QUOTE...");
-    if let Err(e) = ias::verify_quote(&quote) {
+    if let Err(e) = ias::verify_quote(&quote).await {
         error!("QUOTE invalid!");
         error!("{:?}", &e);
         return Err(e);
@@ -160,7 +163,7 @@ pub fn subcommand_send(matches: &ArgMatches) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn subcommand_recv(matches: &ArgMatches) -> Result<(), Error> {
+pub async fn subcommand_recv<'a>(matches: &ArgMatches<'a>) -> Result<(), Error> {
 //    let mut output: Box<dyn Write> = if let Some(name) = matches.value_of("output") {
 //        Box::new(File::create(name)?)
 //    } else {
@@ -184,7 +187,7 @@ pub fn subcommand_recv(matches: &ArgMatches) -> Result<(), Error> {
     info!("epid_group_id: {}", unsafe { as_hex!(&epid_group_id, sgx_epid_group_id_t) });
 
     info!("Retrieving SigRL...");
-    let sigrl = ias::get_sigrl(&epid_group_id)?;
+    let sigrl = ias::get_sigrl(&epid_group_id).await?;
 
     let bind_addr = (Ipv4Addr::new(0, 0, 0, 0), port);
     info!("Listening at {:?}...", &bind_addr);
@@ -282,7 +285,7 @@ pub fn subcommand_open(matches: &ArgMatches) -> Result<(), Error> {
     while {
         let nread = unsafe { ecall!(enclave, isded_read(handle, buf.as_mut_ptr(), buf.len())) };
         if nread < 0 {
-            warn!("read_file() returned {}", nread);
+            warn!("isded_read() returned {}", nread);
         }
         std::io::stdout().write_all(&buf[..nread.try_into().unwrap()])?;
 
@@ -292,6 +295,117 @@ pub fn subcommand_open(matches: &ArgMatches) -> Result<(), Error> {
     eprintln!("{}", benchmark_start.elapsed().as_secs_f64());
 
     enclave.destroy();
+
+    Ok(())
+}
+
+// enclave, handle, filesize, bufsize
+static SERVE_CONTEXT: OnceCell<(SgxEnclave, i64, usize, usize)> = OnceCell::new();
+fn parse_range(range: &str) -> Option<Vec<(usize, usize)>> {
+    let filesize = SERVE_CONTEXT.get().unwrap().2;
+    if let Some(range) = range.strip_prefix("bytes=") {
+        let mut ret = Vec::new();
+        for range in range.split(", ") {
+            match range.split("-").collect::<Vec<&str>>().as_slice() {
+                ["", ""] => return None,
+                [start, ""] => 
+                    if let Ok(start) = start.parse() {
+                        let len = filesize - start;
+                        ret.push((start, len));
+                    } else {
+                        return None;
+                    },
+                ["", sufflen] =>
+                    if let Ok(sufflen) = sufflen.parse() {
+                        let start = filesize - sufflen;
+                        ret.push((start, sufflen));
+                    } else {
+                        return None;
+                    },
+                [start, end] =>
+                    if let (Ok(start), Ok(end)) = (start.parse(), end.parse::<usize>()) {
+                        ret.push((start, end + 1 - start));
+                    } else {
+                        return None;
+                    },
+                _ => return None,
+            }
+        }
+        Some(ret)
+    } else {
+        None
+    }
+}
+fn path_to_mime(p: &str) -> String {
+    mime_guess::from_path(&p)
+        .first()
+        .map(|m| m.to_string())
+        .unwrap_or("application/octet-stream".to_string())
+}
+fn serve(path: String, range: Option<String>) -> Response<Vec<u8>> {
+    info!("got request: {}", &path);
+    let (enclave, handle, filesize, bufsize) = SERVE_CONTEXT.get().unwrap();
+    let res = Response::builder()
+        .header("content-type", &path_to_mime(&path))
+        .header("accept-ranges", "bytes");
+    if_chain! {
+        if let Some(r) = range;
+        if let Some(rs) = parse_range(&r);
+        if let [(start, len)] = rs.as_slice();
+        then {
+            info!("got request range: {}", &r);
+            unsafe { ecall!(enclave, isded_seek(*handle, (*start).try_into().unwrap(), 0)); }
+            let mut buf = vec![0u8; *len];
+            let mut wpos = 0;
+            loop {
+                let nread = *std::cmp::min(bufsize, &(*len - wpos));
+                let wbuf = &mut buf[wpos..wpos + nread];
+                let nread: usize = unsafe { ecall!(enclave, isded_read(*handle, wbuf.as_mut_ptr(), nread)) }.try_into().unwrap();
+                wpos += nread;
+                if nread == 0 {
+                    break;
+                }
+            }
+            buf.resize(wpos, 0);
+            res
+            .status(206)
+            .header("content-range", format!("bytes {}-{}/{}", start, start + len, filesize))
+            .body(buf).unwrap()
+        } else { // 全部送る
+            unsafe { ecall!(enclave, isded_seek(*handle, 0, 0)); }
+            let mut data = Vec::new();
+            loop {
+                let mut buf = vec![0u8; *bufsize];
+                let nread = unsafe { ecall!(enclave, isded_read(*handle, buf.as_mut_ptr(), buf.len())) };
+                if nread <= 0 {
+                    break;
+                }
+                buf.resize(nread.try_into().unwrap(), 0);
+                data.append(&mut buf);
+            }
+            res
+            .status(200)
+            .body(data).unwrap()
+        }
+    }
+}
+pub async fn subcommand_serve<'a>(matches: &ArgMatches<'a>) -> Result<(), Error> {
+    let enclave = init_enclave().expect("init_enclave failed!");
+
+    let filename = matches.value_of("input").expect("specify the filename!");
+    let bufsize = value_t!(matches.value_of("bufsize"), usize).unwrap_or(1048576);
+    let port = value_t!(matches.value_of("port"), u16).unwrap_or(8080);
+    let filename = CString::new(filename)?;
+    let handle = unsafe { ecall!(enclave, isded_open(filename.as_ptr())) };
+    info!("Opened file handle: {}", handle);
+    let filesize: usize = unsafe { ecall!(enclave, isded_stat_size(handle)) }.try_into()?;
+    info!("File filesize: {}", filesize);
+    SERVE_CONTEXT.set((enclave, handle, filesize, bufsize)).unwrap();
+    
+    let hi = warp::path!(String)
+        .and(warp::header::optional::<String>("range"))
+        .map(serve);
+    warp::serve(hi).run(([127, 0, 0, 1], port)).await;
 
     Ok(())
 }
