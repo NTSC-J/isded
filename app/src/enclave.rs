@@ -1,71 +1,106 @@
+#![allow(non_upper_case_globals)]
+#![allow(non_camel_case_types)]
+#![allow(non_snake_case)]
+//#![allow(improper_ctypes)]
+//#![allow(dead_code)]
+
 use sgx_types::*;
 use sgx_urts::SgxEnclave;
-use std::path::PathBuf;
-use std::fs::File;
-use std::io::{Read, Write};
+use std::path::Path;
+use std::fs::OpenOptions;
+use std::fmt::Debug;
+use std::io::{Read, Write, Seek, SeekFrom};
+use thiserror::Error;
 
-const ENCLAVE_FILE: &str = "enclave.signed.so";
-const ENCLAVE_TOKEN: &str = "enclave.token";
+#[derive(Debug, Error)]
+pub enum EnclaveError {
+    #[error("SGX error {0:?}")]
+    SgxError(sgx_status_t),
+    #[error(transparent)]
+    IOError(#[from] std::io::Error),
+    #[error("ECall error {0}")]
+    ECallError(i64),
+}
+impl From<sgx_status_t> for EnclaveError {
+    fn from(s: sgx_status_t) -> Self {
+        Self::SgxError(s)
+    }
+}
+pub type EnclaveResult<T> = Result<T, EnclaveError>;
 
-pub fn init_enclave() -> SgxResult<SgxEnclave> {
-    info!("init_enclave()");
-    let mut launch_token: sgx_launch_token_t = [0; 1024];
-    let mut launch_token_updated: i32 = 0;
-    // Step 1: try to retrieve the launch token saved by last transaction
-    //         if there is no token, then create a new one.
-    //
-    // try to get the token saved in $HOME */
-    let mut home_dir = PathBuf::new();
-    let use_token = match dirs::home_dir() {
-        Some(path) => {
-            home_dir = path;
-            true
-        },
-        None => {
-            info!("Cannot get home dir");
-            false
+pub struct Enclave {
+    inner: SgxEnclave
+}
+
+impl Enclave {
+    pub fn create<P: AsRef<Path>, Q: AsRef<Path>>(enclave_path: &P, token_path: &Q, debug: bool) -> EnclaveResult<Self> {
+        let mut launch_token: sgx_launch_token_t = [0u8; 1024];
+        let mut launch_token_updated = 0i32;
+        // Step 1: try to retrieve the launch token saved by last transaction
+        //         if there is no token, then create a new one.
+        //
+        // try to get the saved token */
+        let mut token_file = OpenOptions::new().read(true).write(true).create(true).open(&token_path)?;
+        if token_file.read_exact(&mut launch_token).is_err() {
+            // token file new or invalid, resetting buffer.
+            launch_token = [0u8; 1024];
         }
-    };
 
-    let token_file: PathBuf = home_dir.join(ENCLAVE_TOKEN);
-    if use_token {
-        match File::open(&token_file) {
-            Err(_) => {
-                info!("Open token file {} error! Will create one.", token_file.as_path().to_str().unwrap());
+        // Step 2: call sgx_create_enclave to initialize an enclave instance
+        // Debug Support: set 2nd parameter to 1
+        let mut misc_attr = sgx_misc_attribute_t {
+            secs_attr: sgx_attributes_t {
+                flags: 0,
+                xfrm: 0
             },
-            Ok(mut f) => {
-                match f.read(&mut launch_token) {
-                    Ok(1024) => {},
-                    _ => info!("Token file invalid, will create new token file"),
+            misc_select: 0
+        };
+        let enclave = SgxEnclave::create(
+            &enclave_path,
+            debug.into(),
+            &mut launch_token,
+            &mut launch_token_updated,
+            &mut misc_attr)?;
+
+        // Step 3: save the launch token if it is updated
+        if launch_token_updated != 0 {
+            info!("Saving new enclave launch token");
+            token_file.seek(SeekFrom::Start(0))?;
+            token_file.write_all(&launch_token)?;
+        }
+
+        Ok(Enclave {
+            inner: enclave
+        })
+    }
+}
+
+macro_rules! ecall_define {
+    (
+        $(#[$attr:meta])*
+        fn $fn_name:ident (
+            $($(#[edl($e:expr)])* $arg:ident : $arg_ty:ty),* $(,)*
+        ) -> Result<$ok_ty:tt> // needed to be tt
+        $body:tt
+    ) => (
+        extern {
+            #[allow(dead_code)]
+            fn $fn_name(eid: sgx_enclave_id_t, retval: *mut i64, $($arg:$arg_ty),*) -> sgx_status_t;
+        }
+        impl Enclave {
+            #[allow(dead_code)]
+            pub unsafe fn $fn_name(&self, $($arg:$arg_ty),*) -> EnclaveResult<i64> {
+                let mut retval = 0i64;
+                let status = $fn_name(self.inner.geteid(), &mut retval, $($arg),*);
+                if status != sgx_status_t::SGX_SUCCESS {
+                    return Err(EnclaveError::SgxError(status));
                 }
+                if retval < 0 {
+                    return Err(EnclaveError::ECallError(retval));
+                }
+                Ok(retval)
             }
         }
-    }
-
-    // Step 2: call sgx_create_enclave to initialize an enclave instance
-    // Debug Support: set 2nd parameter to 1
-    let debug = 1;
-    let mut misc_attr = sgx_misc_attribute_t {secs_attr: sgx_attributes_t { flags:0, xfrm:0}, misc_select:0};
-    let enclave = SgxEnclave::create(ENCLAVE_FILE,
-                                     debug,
-                                     &mut launch_token,
-                                     &mut launch_token_updated,
-                                     &mut misc_attr)?;
-
-    // Step 3: save the launch token if it is updated
-    if use_token && launch_token_updated != 0 {
-        // reopen the file with write capablity
-        match File::create(&token_file) {
-            Ok(mut f) => {
-                if f.write_all(&launch_token).is_err() {
-                    info!("Failed to save updated launch token!");
-                }
-            },
-            Err(_) => {
-                info!("Failed to save updated enclave token, but doesn't matter");
-            },
-        }
-    }
-
-    Ok(enclave)
+    )
 }
+include!("../../enclave/src/ecall_impl.rs");

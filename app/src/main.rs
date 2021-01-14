@@ -7,15 +7,12 @@
 
 use std::io::{self, Write};
 use clap::*;
-use failure::Error;
-use std::result::Result;
 use chrono::prelude::*;
 use once_cell::sync::Lazy;
 
 #[macro_use]
 extern crate log;
 
-mod ecalls;
 mod ias;
 mod enclave;
 mod msg_stream;
@@ -26,7 +23,7 @@ use subcommands::*;
 static APP_YAML: Lazy<yaml_rust::Yaml> = Lazy::new(|| load_yaml!("cli.yaml").clone());
 
 #[tokio::main]
-async fn main() -> Result<(), Error> {
+async fn main() -> std::result::Result<(), subcommands::Error> {
     env_logger::builder()
         .format(|buf, record| {
             writeln!(buf, "[{} {} {}] {}",
@@ -56,14 +53,10 @@ async fn main() -> Result<(), Error> {
         }
     };
 
-    // TODO: 細分化
-    match subcommand_result {
-        Err(e) => {
-            eprintln_help();
-            Err(e)
-        },
-        Ok(_) => Ok(())
+    if let Err(subcommands::Error::ClapError(_)) = subcommand_result {
+        eprintln_help();
     }
+    subcommand_result
 }
 
 fn get_clap_app() -> App<'static, 'static> {

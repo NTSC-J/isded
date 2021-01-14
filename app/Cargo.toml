@@ -16,7 +16,6 @@ dirs = "1.0.2"
 clap = { version = "2.33.3", features = ["yaml"] }
 memmap = "0.6.2"
 serde_json = "1.0.44"
-failure = "0.1.6"
 env_logger = "0.7"
 num-traits = "0.2"
 num-derive = "0.3"
