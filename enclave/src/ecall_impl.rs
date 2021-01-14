@@ -39,9 +39,6 @@ ecall_define! {
 
         let pubkey_hash = rsgx_sha256_slice(&pubkeys)?;
 
-        // report_data: Additional data bound with REPORT
-        // contains this enclave's public key (gb)
-        // TODO: should include ga too?
         let report_data = {
             let mut r = sgx_report_data_t::default();
             r.d[..32].clone_from_slice(&pubkey_hash);
@@ -233,7 +230,6 @@ ecall_define! {
         }
     }
 }
-
 
 ecall_define! {
     fn test_policy(

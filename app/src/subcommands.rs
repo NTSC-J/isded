@@ -367,9 +367,11 @@ fn serve(path: String, range: Option<String>) -> Response<Vec<u8>> {
                 }
             }
             buf.resize(wpos, 0);
+            debug!("read {} bytes", buf.len());
             res
             .status(206)
             .header("content-range", format!("bytes {}-{}/{}", start, start + len, filesize))
+            .header("content-length", format!("{}", len))
             .body(buf).unwrap()
         } else { // 全部送る
             unsafe { ecall!(enclave, isded_seek(*handle, 0, 0)); }
@@ -383,8 +385,10 @@ fn serve(path: String, range: Option<String>) -> Response<Vec<u8>> {
                 buf.resize(nread.try_into().unwrap(), 0);
                 data.append(&mut buf);
             }
+            debug!("read {} bytes", data.len());
             res
             .status(200)
+            .header("content-length", format!("{}", data.len()))
             .body(data).unwrap()
         }
     }
