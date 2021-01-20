@@ -11,6 +11,7 @@ use sgx_types::*;
 use std::io::{self, Read, Write};
 use std::fs::File;
 use std::ffi::CString;
+use std::time::Duration;
 use clap::*;
 use sgx_ucrypto::{SgxEccHandle, rsgx_sha256_slice};
 use std::convert::TryInto;
@@ -96,6 +97,7 @@ pub async fn subcommand_send<'a>(matches: &ArgMatches<'a>) -> Result<()> {
     let host = matches.value_of("to").expect("specify the host!");
     let port = value_t!(matches.value_of("port"), u16).unwrap_or(ISDED_PORT);
     let bufsize = value_t!(matches.value_of("bufsize"), usize).unwrap_or(1048576);
+    let retry_sec = Duration::from_secs_f64(value_t!(matches.value_of("retry-sec"), f64).unwrap_or(5.0));
 
     info!("Creating EC key pair...");
     let ecc = SgxEccHandle::new();
@@ -103,7 +105,13 @@ pub async fn subcommand_send<'a>(matches: &ArgMatches<'a>) -> Result<()> {
     let (private_key, public_key) = ecc.create_key_pair().unwrap();
 
     info!("Opening socket to {}:{}", host, port);
-    let stream = TcpStream::connect(format!("{}:{}", host, port))?;
+    let stream = loop {
+        if let Ok(s) = TcpStream::connect(format!("{}:{}", host, port)) {
+            break s;
+        }
+        info!("Failed to open socket, retrying in {:?}...", retry_sec);
+        std::thread::sleep(retry_sec);
+    };
     let mut stream = MsgStream::new(stream);
 
     info!("Sending EC public key...");
