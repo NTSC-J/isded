@@ -24,6 +24,7 @@ use once_cell::sync::OnceCell;
 use warp::{Filter, http::Response};
 use if_chain::if_chain;
 use thiserror::Error;
+use rand::Rng;
 
 const ISDED_PORT: u16 = 5555;
 const ENCLAVE_FILE: &str = "enclave.signed.so";
@@ -97,7 +98,7 @@ pub async fn subcommand_send<'a>(matches: &ArgMatches<'a>) -> Result<()> {
     let host = matches.value_of("to").expect("specify the host!");
     let port = value_t!(matches.value_of("port"), u16).unwrap_or(ISDED_PORT);
     let bufsize = value_t!(matches.value_of("bufsize"), usize).unwrap_or(1048576);
-    let retry_sec = Duration::from_secs_f64(value_t!(matches.value_of("retry-sec"), f64).unwrap_or(5.0));
+    let retry_sec = Duration::from_secs_f64(value_t!(matches.value_of("retry-sec"), f64).unwrap_or(1.0));
 
     info!("Creating EC key pair...");
     let ecc = SgxEccHandle::new();
@@ -175,10 +176,12 @@ pub async fn subcommand_send<'a>(matches: &ArgMatches<'a>) -> Result<()> {
     loop {
         let mut buf = vec![0u8; bufsize];
         let nread = input.read(&mut buf)?;
+        info!("Read {} bytes", nread);
         if nread == 0 {
             break;
         }
         stream.write_msg(MsgType::EncryptedDataChunk, &encrypt(&aes_key, &buf[..nread]))?;
+        info!("Sent {} bytes", nread);
     }
 
     info!("Sending finish request...");
@@ -320,6 +323,33 @@ pub fn subcommand_open(matches: &ArgMatches) -> Result<()> {
     } {}
 
     eprintln!("{}", benchmark_start.elapsed().as_secs_f64());
+
+    Ok(())
+}
+
+pub fn subcommand_test2(matches: &ArgMatches) -> Result<()> {
+    let enclave = create_enclave()?;
+
+    // TODO: support stdin
+    let filename = matches.value_of("input").expect("specify the filename!");
+    let bufsize = value_t!(matches.value_of("bufsize"), usize).unwrap_or(4096);
+
+    let filename = CString::new(filename).unwrap();
+    let handle = unsafe { enclave.isded_open(filename.as_ptr()) }?;
+    info!("Opened file handle: {}", handle);
+    let filesize: usize = unsafe { enclave.isded_stat_size(handle) }?.try_into().unwrap();
+
+    let mut buf = vec![0u8; bufsize];
+    let rep = 100;
+    let mut rng = rand::thread_rng();
+
+    let benchmark_start = Instant::now();
+    for _ in 0..rep {
+        let pos: i64 = rng.gen_range(0, filesize - buf.len());
+        unsafe { enclave.isded_seek(handle, pos, 0) }?;
+        unsafe { enclave.isded_read(handle, buf.as_mut_ptr(), buf.len()) }?;
+    }
+    eprintln!("{}", benchmark_start.elapsed().as_secs_f64() / rep as f64);
 
     Ok(())
 }

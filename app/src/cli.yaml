@@ -102,4 +102,11 @@ subcommands:
                 takes_value: true
     - test:
         about: TEST
-
+    - test2:
+        about: TEST2
+        args:
+            - input:
+                long: input
+                short: i
+                help: the name of the input file
+                index: 1

@@ -43,6 +43,7 @@ async fn main() -> std::result::Result<(), subcommands::Error> {
         ("serve", Some(sub_m)) => subcommand_serve(&sub_m).await,
         ("eval", Some(sub_m)) => subcommand_eval(&sub_m),
         ("test", Some(sub_m)) => subcommand_test(&sub_m),
+        ("test2", Some(sub_m)) => subcommand_test2(&sub_m),
         _ => if matches.is_present("version") {
             get_clap_app().write_long_version(&mut io::stdout())?;
             println!();
